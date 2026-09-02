@@ -1,0 +1,14 @@
+# Pinned runtime set for a reproducible default install (local chain + OpenCV face engine).
+# Verified on CPython 3.14 / Windows 11 and CPython 3.11-3.13 / Linux.
+#
+#   python -m pip install -r requirements.txt
+#
+# Optional extras (real EVM testnet anchoring, ArcFace recognizer) live in pyproject.toml:
+#   python -m pip install -e ".[evm]"
+#   python -m pip install -e ".[insightface]"
+
+numpy>=1.26,<3
+Pillow>=10.2
+pydantic>=2.6,<3
+httpx>=0.27
+opencv-python-headless>=4.9,<5

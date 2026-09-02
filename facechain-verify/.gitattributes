@@ -1,0 +1,14 @@
+# Normalise line endings so a Windows <-> Linux round-trip never corrupts a file.
+* text=auto eol=lf
+
+# Binary assets: never touch these.
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.gz    binary
+*.npy   binary
+*.ots   binary
+
+# Shell vs PowerShell line endings.
+*.sh    text eol=lf
+*.ps1   text eol=crlf

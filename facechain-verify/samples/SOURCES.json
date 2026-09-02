@@ -1,0 +1,35 @@
+{
+  "_note": "Provenance for the bundled public-domain images. All are Public Domain (US federal government works or pre-1929 works). Used as offline search-corpus entries and as test fixtures. `facechain fetch-corpus --seed-demo` copies the corpus_* files into data/corpus/ with the post_url below.",
+
+  "probe_obama.jpg": {
+    "post_url": "https://commons.wikimedia.org/wiki/File:Barack_Obama.jpg",
+    "title": "Barack Obama",
+    "source": "Wikimedia Commons (Public domain, work of the US federal government)"
+  },
+  "probe_lincoln.jpg": {
+    "post_url": "https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_O-77_matte_collodion_print.jpg",
+    "title": "Abraham Lincoln (O-77)",
+    "source": "Wikimedia Commons (Public domain, pre-1929)"
+  },
+
+  "corpus_obama_reencode.jpg": {
+    "post_url": "https://commons.wikimedia.org/wiki/File:Barack_Obama.jpg",
+    "title": "Barack Obama (re-encoded: scaled 0.72x, rotated -3 deg, JPEG q72, EXIF stripped)",
+    "source": "Wikimedia Commons (Public domain) - transformed copy to exercise perceptual-hash tolerance"
+  },
+  "corpus_eisenhower.jpg": {
+    "post_url": "https://commons.wikimedia.org/wiki/File:Dwight_D._Eisenhower,_official_photo_portrait,_May_29,_1959.jpg",
+    "title": "Dwight D. Eisenhower official portrait, 1959",
+    "source": "Wikimedia Commons (Public domain, work of the US federal government)"
+  },
+  "corpus_kennedy.jpg": {
+    "post_url": "https://commons.wikimedia.org/wiki/File:John_F._Kennedy,_White_House_photo_portrait,_looking_up.jpg",
+    "title": "John F. Kennedy White House portrait",
+    "source": "Wikimedia Commons (Public domain, work of the US federal government)"
+  },
+  "corpus_reagan.jpg": {
+    "post_url": "https://commons.wikimedia.org/wiki/File:Official_Portrait_of_President_Reagan_1981.jpg",
+    "title": "Ronald Reagan official portrait, 1981",
+    "source": "Wikimedia Commons (Public domain, work of the US federal government)"
+  }
+}

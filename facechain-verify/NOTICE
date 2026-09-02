@@ -1,0 +1,28 @@
+facechain-verify — third-party components
+=========================================
+
+1. OpenCV Haar cascade model
+   File: src/facechain/face/models/haarcascade_frontalface_default.xml.gz
+         (gzip-compressed copy of the OpenCV asset of the same name)
+   Source: https://github.com/opencv/opencv (data/haarcascades/)
+   License: BSD 3-Clause
+   Copyright (C) 2000-2020, Intel Corporation, all rights reserved.
+   Copyright (C) 2009-2011, Willow Garage Inc., all rights reserved.
+   Used unmodified (only gzip-compressed) as the model file for both the OpenCV
+   and the pure-NumPy Viola-Jones face detectors. When opencv-python[-headless]
+   is installed, its own bundled copy is used instead and this file is not read.
+
+2. Bundled sample / test images
+   Paths: samples/*.jpg, tests/fixtures/*.jpg
+   Source: Wikimedia Commons
+   License: Public Domain (works of the U.S. federal government, or published
+   before 1929). Per-file provenance and license: samples/SOURCES.json
+   samples/probe_repost.jpg and tests/fixtures/corpus_obama_reencode.jpg are
+   transformed (cropped / rescaled / recompressed) derivatives of public-domain
+   originals, created to exercise the perceptual-hash tolerance path.
+
+3. Python dependencies
+   numpy (BSD-3-Clause), Pillow (MIT-CMU / HPND), pydantic (MIT),
+   httpx (BSD-3-Clause), opencv-python-headless (Apache-2.0 / MIT).
+   Optional: web3 (MIT), insightface (MIT), onnxruntime (MIT).
+   See each project for full terms.

@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "facechain-verify"
+version = "1.0.0"
+description = "Content-addressed pipeline: face scan -> live web/social match -> tamper-evident blockchain anchor + independent re-verification."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "HH Goa 2026 Task 3 submission" }]
+keywords = ["face-recognition", "reverse-image-search", "blockchain", "merkle", "provenance", "osint"]
+
+dependencies = [
+    "numpy>=1.26,<3",
+    "Pillow>=10.2",
+    "pydantic>=2.6,<3",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# Default face engine. OpenCV 5 removed the legacy CascadeClassifier API, so pin <5.
+opencv = ["opencv-python-headless>=4.9,<5"]
+# Optional production-grade recognizer (ArcFace). Not required; pipeline degrades gracefully.
+insightface = ["insightface>=0.7.3", "onnxruntime>=1.17"]
+# Optional real public-testnet anchoring (EVM: Sepolia / Polygon Amoy / any JSON-RPC).
+evm = ["web3>=6.15,<8"]
+# Optional Bitcoin calendar anchoring.
+opentimestamps = ["opentimestamps>=0.4.5"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "mypy>=1.9",
+    "ruff>=0.4",
+]
+all = [
+    "facechain-verify[opencv,evm,dev]",
+]
+
+[project.scripts]
+facechain = "facechain.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+facechain = ["face/models/*.xml.gz", "py.typed"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RET", "PTH", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favour readable wide signatures and occasionally re-raise broadly.
+"tests/**" = ["E501", "B017", "RUF059"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["facechain"]
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+# numpy's overloaded signatures frequently widen to Any on return; that noise is
+# not worth chasing with casts on every array expression.
+disable_error_code = ["no-any-return"]
+
+# Optional native deps ship incomplete inline stubs; treat them as dynamic.
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "insightface", "insightface.*", "insightface.app"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "network: test performs real outbound network I/O (deselect with -m 'not network')",
+    "slow: slow test",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["facechain"]

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime pipeline output (evidence bundles, receipts, artifacts)
+runs/
+chaindata/
+*.local.json
+.secrets
+
+# Environment
+.env
+
+# Corpus is fetched live via `facechain fetch-corpus`; keep the dir, drop the contents.
+data/corpus/*
+!data/corpus/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
