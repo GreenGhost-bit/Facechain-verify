@@ -37,6 +37,13 @@ _NOISE_HANDLES = {
     "amp", "index", "html", "php", "wiki", "file", "upload", "static", "cdn",
     "img", "image", "images", "media", "content", "assets",
 }
+# Multi-word phrases that the "First Last" regex catches but that are never a
+# person: source attributions, licences, generic captions.
+_NOISE_PHRASES = {
+    "wikimedia commons", "creative commons", "getty images", "associated press",
+    "official portrait", "official photo", "white house", "public domain",
+    "local corpus", "stock photo", "royalty free", "no restrictions",
+}
 _PROVIDER_TRUST = {
     "serpapi": 1.0,
     "hint": 0.85,
@@ -99,7 +106,8 @@ def extract_identity_labels(*texts: str) -> list[str]:
             found.extend(_tokens_from_url(raw))
         else:
             for m in _NAME_RE.finditer(raw):
-                found.append(m.group(1))
+                if m.group(1).lower() not in _NOISE_PHRASES:
+                    found.append(m.group(1))
             # snake/kebab usernames embedded in titles
             for m in re.finditer(r"\b([a-z][a-z0-9]+_[a-z0-9_]{2,})\b", raw.lower()):
                 found.append(m.group(1))
@@ -108,7 +116,7 @@ def extract_identity_labels(*texts: str) -> list[str]:
     out: list[str] = []
     for label in found:
         key = normalize_identity(label)
-        if len(key) < 3 or key in _NOISE_HANDLES or key in seen:
+        if len(key) < 3 or key in _NOISE_HANDLES or key in _NOISE_PHRASES or key in seen:
             continue
         seen.add(key)
         out.append(label.replace("_", " ").strip())
