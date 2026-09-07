@@ -32,7 +32,7 @@ def enhance_rgb_for_faces(rgb: np.ndarray) -> np.ndarray:
     if 0 < min_side < _MIN_SIDE_FOR_DETECT:
         scale = min(_MIN_SIDE_FOR_DETECT / float(min_side), _MAX_UPSCALE)
         img = img.resize(
-            (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+            (max(1, round(w * scale)), max(1, round(h * scale))),
             resample=Image.Resampling.LANCZOS,
         )
 

@@ -13,6 +13,7 @@ Every run attaches file sinks under ``runs/<id>/``:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -55,10 +56,8 @@ class RunLogBundle:
 
     def close(self) -> None:
         for fh in (self.jsonl, self.text):
-            try:
+            with contextlib.suppress(Exception):
                 fh.close()
-            except Exception:
-                pass
 
 
 def open_run_logs(run_dir: Path) -> RunLogBundle:

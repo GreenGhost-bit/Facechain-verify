@@ -19,27 +19,31 @@ def test_sniff_png_and_jpeg() -> None:
 
 def test_host_probe_image_uses_first_successful_host() -> None:
     fake = MagicMock()
-    with patch("facechain.search.probe_host.httpx.Client") as client_cls:
-        client_cls.return_value.__enter__.return_value = fake
-        with patch(
+    with (
+        patch("facechain.search.probe_host.httpx.Client") as client_cls,
+        patch(
             "facechain.search.probe_host._host_catbox",
             return_value="https://files.catbox.moe/abc.png",
-        ) as catbox:
-            with patch("facechain.search.probe_host._host_litterbox") as litter:
-                url = host_probe_image(b"\x89PNG\r\n\x1a\nxxxx")
+        ) as catbox,
+        patch("facechain.search.probe_host._host_litterbox") as litter,
+    ):
+        client_cls.return_value.__enter__.return_value = fake
+        url = host_probe_image(b"\x89PNG\r\n\x1a\nxxxx")
     assert url == "https://files.catbox.moe/abc.png"
     catbox.assert_called_once()
     litter.assert_not_called()
 
 
 def test_host_probe_image_falls_through_and_errors() -> None:
-    with patch("facechain.search.probe_host.httpx.Client") as client_cls:
+    with (
+        patch("facechain.search.probe_host.httpx.Client") as client_cls,
+        patch("facechain.search.probe_host._host_catbox", return_value=None),
+        patch("facechain.search.probe_host._host_litterbox", return_value=None),
+        patch("facechain.search.probe_host._host_tmpfiles", return_value=None),
+        pytest.raises(ProviderError, match="failed to host"),
+    ):
         client_cls.return_value.__enter__.return_value = MagicMock()
-        with patch("facechain.search.probe_host._host_catbox", return_value=None):
-            with patch("facechain.search.probe_host._host_litterbox", return_value=None):
-                with patch("facechain.search.probe_host._host_tmpfiles", return_value=None):
-                    with pytest.raises(ProviderError, match="failed to host"):
-                        host_probe_image(b"\xff\xd8\xffxxxx")
+        host_probe_image(b"\xff\xd8\xffxxxx")
 
 
 def test_tmpfiles_dl_rewrite() -> None:
@@ -73,6 +77,7 @@ def test_serpapi_auto_hosts_when_no_probe_url() -> None:
         serpapi_key="k",
         max_candidates_per_provider=12,
         http_timeout_s=20.0,
+        allow_public_probe_host=True,
     )
     probe = SimpleNamespace(
         image_bytes=b"\x89PNG\r\n\x1a\nxxxx",
@@ -97,7 +102,12 @@ def test_serpapi_auto_hosts_when_no_probe_url() -> None:
 def test_serpapi_uses_explicit_probe_url_without_hosting() -> None:
     fetcher = MagicMock()
     fetcher.get_json.return_value = {"visual_matches": []}
-    settings = SimpleNamespace(serpapi_key="k", max_candidates_per_provider=12, http_timeout_s=20.0)
+    settings = SimpleNamespace(
+        serpapi_key="k",
+        max_candidates_per_provider=12,
+        http_timeout_s=20.0,
+        allow_public_probe_host=False,
+    )
     probe = SimpleNamespace(
         image_bytes=b"\xff\xd8\xff",
         settings=settings,
@@ -108,3 +118,24 @@ def test_serpapi_uses_explicit_probe_url_without_hosting() -> None:
         list(SerpApiProvider().search(probe))  # type: ignore[arg-type]
     host.assert_not_called()
     assert fetcher.get_json.call_args.kwargs["params"]["url"] == "https://example.com/mine.jpg"
+
+
+def test_serpapi_skips_hosting_when_not_opted_in() -> None:
+    fetcher = MagicMock()
+    settings = SimpleNamespace(
+        serpapi_key="k",
+        max_candidates_per_provider=12,
+        http_timeout_s=20.0,
+        allow_public_probe_host=False,
+    )
+    probe = SimpleNamespace(
+        image_bytes=b"\x89PNG\r\n\x1a\nxxxx",
+        settings=settings,
+        fetcher=fetcher,
+        extra={},
+    )
+    with patch("facechain.search.serpapi_provider.host_probe_image") as host:
+        out = list(SerpApiProvider().search(probe))  # type: ignore[arg-type]
+    host.assert_not_called()
+    fetcher.get_json.assert_not_called()
+    assert out == []

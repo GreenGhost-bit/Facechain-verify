@@ -3,6 +3,6 @@ include LICENSE NOTICE README.md requirements.txt requirements-dev.txt Makefile
 include contracts/*.sol
 include samples/*.jpg samples/SOURCES.json
 include scripts/*.sh scripts/*.ps1
-recursive-include src/facechain *.gz *.typed
+recursive-include src/facechain *.gz *.typed *.onnx
 recursive-include tests *.py
 recursive-include tests/fixtures *.jpg

@@ -25,8 +25,9 @@ from .errors import FaceChainError
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--engine", choices=["auto", "opencv", "numpy", "insightface"], default=None,
-                   help="face engine (default: auto → insightface when installed)")
+    p.add_argument("--engine", choices=["auto", "sface", "opencv", "numpy", "insightface"],
+                   default=None,
+                   help="face engine (default: auto → insightface > sface > opencv > numpy)")
     p.add_argument("--providers", default=None,
                    help="comma-separated search providers "
                         "(default: serpapi,multiris,wikimedia,local; "
@@ -35,7 +36,11 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                    help="blockchain anchor backend (default: local)")
     p.add_argument("--threshold", type=float, default=None,
                    help="face-match cosine threshold "
-                        "(default: 0.86 opencv / 0.45 insightface)")
+                        "(default: calibrated per engine — sface 0.40, arcface 0.42, lbph 0.86)")
+    p.add_argument("--allow-public-host", action="store_true",
+                   help="permit uploading the probe to a public file host so SerpAPI "
+                        "Lens can crawl it (off by default; needed only for serpapi "
+                        "without --probe-image-url)")
     p.add_argument("--difficulty", type=int, default=None,
                    help="local-chain proof-of-work leading zero bits (default: 0)")
     p.add_argument("--runs-dir", default=None)
@@ -50,8 +55,6 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true", help="emit machine-readable JSON on stdout")
 
 
-# ArcFace same-person scores are typically much lower than OpenCV same-photo scores.
-_INSIGHTFACE_DEFAULT_THRESHOLD = 0.45
 # When multiris / SerpAPI Lens fans out, score a longer tail of candidates.
 _MULTIRIS_MIN_PER_PROVIDER = 24
 _SERPAPI_MIN_PER_PROVIDER = 36
@@ -77,9 +80,12 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
     if getattr(args, "corpus_dir", None):
         overrides["corpus_dir"] = Path(args.corpus_dir)
 
+    if getattr(args, "allow_public_host", False):
+        overrides["allow_public_probe_host"] = True
+
     settings = Settings.load(**overrides)
-    # Main pipeline defaults: ArcFace threshold + Lens/multiris candidate budgets.
-    settings = _apply_insightface_threshold(settings, threshold_explicit=threshold_explicit)
+    # Threshold is resolved per-engine downstream (calibration table); here we
+    # only widen candidate budgets for the fan-out providers and wire --hint.
     settings = _apply_search_candidate_budgets(settings)
     return _ensure_hint_provider(settings, getattr(args, "hint", None))
 
@@ -91,36 +97,6 @@ def _ensure_hint_provider(settings: Settings, hint: str | None) -> Settings:
     if "hint" in settings.search_providers:
         return settings
     return settings.with_(search_providers=(*settings.search_providers, "hint"))
-
-
-def _apply_insightface_threshold(settings: Settings, *, threshold_explicit: bool) -> Settings:
-    """Default match threshold to 0.45 when the effective face engine is ArcFace."""
-    if threshold_explicit:
-        return settings
-    import os
-
-    from .config import load_dotenv
-
-    # Honour an explicit env / .env override even when --threshold is omitted.
-    env = load_dotenv()
-    if env.get("FACECHAIN_MATCH_THRESHOLD") or os.environ.get("FACECHAIN_MATCH_THRESHOLD"):
-        return settings
-
-    # Import-only check — do not load the ONNX pack just to pick a default threshold.
-    try:
-        import insightface  # noqa: F401
-        import onnxruntime  # noqa: F401
-
-        insightface_installed = True
-    except Exception:
-        insightface_installed = False
-
-    uses_arcface = settings.face_engine == "insightface" or (
-        settings.face_engine == "auto" and insightface_installed
-    )
-    if uses_arcface:
-        return settings.with_(match_threshold=_INSIGHTFACE_DEFAULT_THRESHOLD)
-    return settings
 
 
 def _apply_search_candidate_budgets(settings: Settings) -> Settings:
@@ -139,7 +115,7 @@ def _apply_multiris_candidate_budget(settings: Settings) -> Settings:
 
 
 def _apply_serpapi_candidate_budget(settings: Settings) -> Settings:
-    """Raise per-provider candidate cap for SerpAPI Google Lens (often 40–60 visual matches)."""
+    """Raise per-provider candidate cap for SerpAPI Google Lens (often 40-60 visual matches)."""
     if "serpapi" not in settings.search_providers:
         return settings
     if settings.max_candidates_per_provider >= _SERPAPI_MIN_PER_PROVIDER:
@@ -199,7 +175,7 @@ def _print_closest_near_miss(detail: object) -> None:
             }
     if not isinstance(closest, dict):
         return
-    sim = closest.get("similarity")
+    sim: Any = closest.get("similarity")
     try:
         sim_s = f"{float(sim):.4f}"
     except (TypeError, ValueError):
@@ -257,28 +233,36 @@ def _cmd_search(args: argparse.Namespace) -> int:
         print(f"live log      : {bundle_logs.run_log_path}", flush=True)
         print(f"              (tail -f {bundle_logs.run_log_path})", flush=True)
 
-    exit_code = 0
     try:
         image = load_image_path(args.image, max_bytes=settings.max_image_bytes,
                                 max_pixels=settings.max_image_pixels)
         LOG.info("search.probe_loaded", bytes=len(image.raw_bytes),
                  size=f"{image.fingerprint.width}x{image.fingerprint.height}")
         engine = build_face_engine(settings.face_engine)
+        settings = settings.with_calibrated_threshold(engine.name)
         _, embedding, _ = encode_probe(image, engine=engine, min_face_pixels=settings.min_face_pixels)
         providers = build_providers(settings)
         with SafeFetcher(contact=settings.http_contact, timeout_s=settings.http_timeout_s,
                          max_redirects=settings.http_max_redirects,
                          max_bytes=settings.max_image_bytes) as fetcher:
+            _probe_extra = (
+                {"probe_image_url": args.probe_image_url} if args.probe_image_url else {}
+            )
             ctx = ProbeContext(image_bytes=image.raw_bytes, rgb=image.rgb, embedding=embedding,
                                settings=settings, fetcher=fetcher, face_engine=engine, hint=args.hint,
-                               extra={"probe_image_url": args.probe_image_url} if args.probe_image_url else {})
+                               extra=_probe_extra)
             try:
                 result = SearchAggregator(providers).run(ctx)
             except FaceChainError as exc:
+                _detail = (
+                    exc.detail
+                    if isinstance(exc.detail, (dict, list, str, type(None)))
+                    else repr(exc.detail)
+                )
                 _save_json(run_dir / "no_match_debug.json", {
                     "error": exc.code,
                     "message": str(exc),
-                    "detail": exc.detail if isinstance(exc.detail, (dict, list, str, type(None))) else repr(exc.detail),
+                    "detail": _detail,
                 })
                 LOG.warning("search.no_match", error=str(exc), run_dir=str(run_dir))
                 if args.json:
@@ -296,8 +280,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
                     print(f"NO MATCH: {exc}", file=sys.stderr, flush=True)
                     _print_closest_near_miss(exc.detail)
                     print(f"logs: {bundle_logs.run_log_path}", file=sys.stderr, flush=True)
-                exit_code = exc.exit_code
-                return exit_code
+                return exc.exit_code
 
         _save_json(run_dir / "match.json", result.match)
         _save_json(run_dir / "summary.json", result.summary)
@@ -478,6 +461,17 @@ def _cmd_fetch_corpus(args: argparse.Namespace) -> int:
     return 0 if n > 0 else 1
 
 
+def _cmd_fetch_models(args: argparse.Namespace) -> int:
+    """Pre-download + checksum-verify the ONNX face models (YuNet + SFace)."""
+    from .face.onnx_zoo import ensure_models
+
+    paths = ensure_models(download=True)
+    for name, path in paths.items():
+        print(f"{name:6}: {path}")
+    print("ok - the 'sface' engine is now available offline")
+    return 0
+
+
 def _cmd_version(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     info = {
@@ -546,6 +540,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed-demo", action="store_true",
                    help="copy the repo's bundled public-domain fixtures instead of pulling live")
     p.set_defaults(func=_cmd_fetch_corpus)
+
+    p = sub.add_parser("fetch-models", help="pre-download the ONNX face models (YuNet + SFace)")
+    p.set_defaults(func=_cmd_fetch_models)
 
     p = sub.add_parser("version", help="print version + effective config")
     _add_common(p)

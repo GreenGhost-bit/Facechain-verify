@@ -12,7 +12,8 @@ ranked list for a repeated name or @handle (e.g. many Lens hits saying
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
@@ -63,8 +64,7 @@ def normalize_identity(text: str) -> str:
     t = unquote(text or "").strip().lower()
     t = t.replace("@", "")
     t = re.sub(r"[_\-.]+", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _tokens_from_url(url: str) -> list[str]:
@@ -132,10 +132,10 @@ def identities_match(a: str, b: str) -> bool:
     return False
 
 
-def _fold_identity_weights(weights: Counter[str]) -> Counter[str]:
+def _fold_identity_weights(weights: Mapping[str, float]) -> dict[str, float]:
     """Merge short keys into longer ones (``elvish`` → ``elvish yadav``)."""
     keys = sorted(weights.keys(), key=lambda k: (-len(k), -weights[k]))
-    folded: Counter[str] = Counter()
+    folded: dict[str, float] = defaultdict(float)
     consumed: set[str] = set()
     for long in keys:
         if long in consumed:
@@ -181,7 +181,7 @@ def consensus_from_candidates(
     if len(strong) >= 2:
         pool = strong
 
-    weights: Counter[str] = Counter()
+    weights: dict[str, float] = defaultdict(float)
     examples: dict[str, list[str]] = {}
     for cand in pool:
         sim = max(0.0, cand.similarity_ppm / 1e6)
@@ -214,7 +214,7 @@ def consensus_from_candidates(
         folded_examples.setdefault(target, []).extend(labs)
     examples = folded_examples
 
-    best_key, best_w = weights.most_common(1)[0]
+    best_key, best_w = max(weights.items(), key=lambda kv: kv[1])
     support = sum(
         1
         for c in pool

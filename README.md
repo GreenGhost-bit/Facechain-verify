@@ -69,13 +69,24 @@ together; two different faces produce embeddings that are far apart. "Close" and
 "far" are measured with **cosine similarity**, a number from ‑1 to 1 where 1
 means identical.
 
-Three interchangeable face engines are included:
-- **`opencv`** (default) — OpenCV's classic Haar face detector + a hand‑built
-  texture/shape descriptor (LBP + HOG). No model download, fully deterministic.
-- **`numpy`** — the same detector re‑implemented in pure NumPy, so the pipeline
-  still runs if OpenCV can't be installed. Slower, slightly less accurate.
-- **`insightface`** — an optional deep‑learning face recogniser (ArcFace). Best
-  accuracy; install it only if you want it.
+Four interchangeable face engines are included (`--engine`, default `auto` picks
+the best available):
+- **`sface`** (default) — OpenCV DNN **YuNet** detector (with 5 facial landmarks)
+  + landmark‑aligned **SFace** 128‑D identity embedding. Runs on
+  `opencv-python-headless` alone (no `onnxruntime`); the 37 MB SFace model is
+  downloaded once and checksum‑pinned (`facechain fetch-models`). On the bundled
+  fixtures a genuine same‑person pair scores ≈0.98 cosine while impostors stay
+  below ≈0.25 — a wide, calibrated margin.
+- **`insightface`** — optional ArcFace (512‑D). Comparable accuracy; heavier
+  install. Preferred over `sface` when present.
+- **`opencv`** — the legacy Haar detector + a hand‑built LBP/HOG texture
+  descriptor. Deterministic, no model download; near‑duplicate matcher only.
+- **`numpy`** — the Haar detector re‑implemented in pure NumPy so the pipeline
+  still runs on a bare `numpy + Pillow` install. Slowest, least accurate.
+
+Each engine carries a **calibrated threshold** and a cosine→probability curve
+(`facechain.face.calibration`), so `--threshold` is optional and the report shows
+a `match` / `likely` / `no‑match` band, not just a raw number.
 
 ### Stage 2 — Web / social‑media search
 It uses the face embedding to look for a **matching image that really exists on
@@ -404,9 +415,10 @@ python -m facechain search ./my_face.jpg \
   --providers multiris
 ```
 
-With `--engine insightface` the default match threshold becomes `0.45` (ArcFace
-same‑person scores are lower than OpenCV same‑photo scores). Override with
-`--threshold` or `FACECHAIN_MATCH_THRESHOLD` if you need to.
+The match threshold is calibrated per engine (`sface` 0.40, `insightface` 0.42,
+`opencv`/`numpy` 0.86) — deep‑embedding same‑person scores are far lower than the
+legacy descriptor's same‑photo scores. Override with `--threshold` or
+`FACECHAIN_MATCH_THRESHOLD` if you need to.
 
 This still only finds **public, indexed** pages. Private Instagram / Facebook
 posts are not reachable. You can combine providers:

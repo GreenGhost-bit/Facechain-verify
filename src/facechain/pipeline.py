@@ -125,6 +125,17 @@ def run_pipeline(
         run_log=str(bundle_logs.run_log_path),
         telemetry=str(bundle_logs.telemetry_path),
     )
+    # Resolve the face engine up front so the settings digest and the notarised
+    # threshold reflect the engine that actually ran (and its calibrated cut).
+    engine = build_face_engine(settings.face_engine)
+    settings = settings.with_calibrated_threshold(engine.name)
+    LOG.info(
+        "face.threshold",
+        engine=engine.name,
+        threshold=settings.match_threshold,
+        explicit=settings.threshold_explicit,
+    )
+
     digest = settings_digest(settings)
     manifest = RunManifest(
         run_id=run_id,
@@ -151,7 +162,6 @@ def run_pipeline(
             manifest.artifacts["probe_fingerprint"] = "probe_fingerprint.json"
 
             # 2. face -------------------------------------------------
-            engine = build_face_engine(settings.face_engine)
             with log.span("stage.face", engine=engine.name):
                 face_record, embedding, _ambiguous = encode_probe(
                     probe,

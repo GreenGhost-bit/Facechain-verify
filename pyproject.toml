@@ -47,7 +47,7 @@ facechain = "facechain.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-facechain = ["face/models/*.xml.gz", "py.typed"]
+facechain = ["face/models/*.xml.gz", "face/models/*.onnx", "py.typed"]
 
 [tool.ruff]
 line-length = 110

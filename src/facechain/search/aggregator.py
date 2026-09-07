@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
 
@@ -69,6 +70,14 @@ class SearchAggregator:
 
     def run(self, probe: ProbeContext) -> AggregateResult:
         settings = probe.settings
+        # Accept/reject cut: operator's value if pinned, else the calibrated
+        # per-engine default (LBPH rides ~0.86, SFace/ArcFace ~0.4).
+        if settings.threshold_explicit:
+            eff_threshold = settings.match_threshold
+        else:
+            from ..face.calibration import default_threshold
+
+            eff_threshold = default_threshold(probe.face_engine.name)
         raw: list[RawCandidate] = []
         providers_run: list[str] = []
         providers_ok: list[str] = []
@@ -113,7 +122,7 @@ class SearchAggregator:
         ranked_models_pre = [s.model for s in scored]
         consensus = consensus_from_candidates(
             ranked_models_pre,
-            threshold_ppm=to_fixed(settings.match_threshold),
+            threshold_ppm=to_fixed(eff_threshold),
         )
         scored.sort(
             key=lambda s: cluster_score(s.model, consensus),
@@ -130,13 +139,13 @@ class SearchAggregator:
             candidates_scored=len(scored),
         )
 
-        threshold = settings.match_threshold
+        threshold = eff_threshold
         ranked_models = [s.model for s in scored]
 
         if not scored or scored[0].similarity < threshold:
             closest = scored[0] if scored else None
             closest_sim = closest.similarity if closest else 0.0
-            closest_info = None
+            closest_info: dict[str, Any] | None = None
             if closest is not None:
                 closest_info = {
                     "similarity": round(closest.similarity, 4),
@@ -169,6 +178,7 @@ class SearchAggregator:
             )
 
         best = scored[0]
+        decided_by = "embedding_cosine"
         # If consensus names a person and the face-best disagrees, prefer the
         # strongest consensus-agreeing hit that still clears the threshold.
         if consensus is not None:
@@ -190,6 +200,8 @@ class SearchAggregator:
                             identity=consensus.label,
                         )
                         best = s
+                        # The winner is no longer the top embedding score -- say so.
+                        decided_by = "embedding_cosine+text_consensus"
                     break
 
         ambiguous = False
@@ -217,6 +229,7 @@ class SearchAggregator:
 
         match = MatchResult(
             threshold_ppm=to_fixed(threshold),
+            decided_by=decided_by,
             ambiguous=ambiguous,
             ambiguity_note=note,
             identity_guess=consensus.label if consensus else "",

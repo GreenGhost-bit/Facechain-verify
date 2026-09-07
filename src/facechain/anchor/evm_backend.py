@@ -193,7 +193,7 @@ class EVMChainAnchor:
             "nonce": self._w3.eth.get_transaction_count(self._acct.address),
             "data": "0x" + encode_calldata(record_hash).hex(),
         }
-        tx["gas"] = self._w3.eth.estimate_gas(tx)  # type: ignore[arg-type]
+        tx["gas"] = self._w3.eth.estimate_gas(tx)
         tx.update(self._fee_fields())
         signed = self._acct.sign_transaction(tx)
         return self._w3.eth.send_raw_transaction(signed.raw_transaction)
@@ -202,7 +202,7 @@ class EVMChainAnchor:
         contract = self._w3.eth.contract(address=self._registry_address, abi=REGISTRY_ABI)
         fn = contract.functions.anchor(bytes.fromhex(record_hash))
         tx = fn.build_transaction(
-            {  # type: ignore[arg-type]
+            {
                 "chainId": self._chain_id,
                 "from": self._acct.address,
                 "nonce": self._w3.eth.get_transaction_count(self._acct.address),

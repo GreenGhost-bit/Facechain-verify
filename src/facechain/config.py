@@ -61,8 +61,12 @@ class Settings(BaseModel):
     min_face_pixels: int = Field(default=48, ge=16)
 
     # -- face matching --------------------------------------------------
-    face_engine: str = Field(default="auto")  # auto | opencv | numpy | insightface
-    match_threshold: float = Field(default=0.86, ge=0.0, le=1.0)
+    face_engine: str = Field(default="auto")  # auto | sface | opencv | numpy | insightface
+    # Effective accept/reject cosine cut. When ``threshold_explicit`` is False the
+    # pipeline overrides this with the calibrated per-engine default once the
+    # engine is known (see facechain.face.calibration).
+    match_threshold: float = Field(default=0.40, ge=0.0, le=1.0)
+    threshold_explicit: bool = Field(default=False)
     ambiguous_margin: float = Field(default=0.04, ge=0.0, le=1.0)
 
     # -- search --------------------------------------------------------
@@ -72,6 +76,10 @@ class Settings(BaseModel):
     max_candidates_per_provider: int = Field(default=12, ge=1, le=100)
     serpapi_key: str | None = None
     google_credentials: str | None = None
+    # SerpAPI Lens needs a public probe URL. If no --probe-image-url is given and
+    # this is True, the probe is uploaded to a short-lived public file host. Off
+    # by default: publishing the subject's face is an explicit choice.
+    allow_public_probe_host: bool = Field(default=False)
     http_contact: str = "facechain-verify (contact: unset)"
     http_timeout_s: float = Field(default=20.0, gt=0)
     http_max_redirects: int = Field(default=3, ge=0, le=10)
@@ -94,10 +102,19 @@ class Settings(BaseModel):
     @field_validator("face_engine")
     @classmethod
     def _known_engine(cls, v: str) -> str:
-        allowed = {"auto", "opencv", "numpy", "insightface"}
+        allowed = {"auto", "sface", "opencv", "numpy", "insightface"}
         if v not in allowed:
             raise ValueError(f"face_engine must be one of {sorted(allowed)}")
         return v
+
+    def with_calibrated_threshold(self, engine_name: str) -> Settings:
+        """Return a copy whose ``match_threshold`` is the calibrated per-engine
+        default -- unless the user set one explicitly, in which case it's kept."""
+        if self.threshold_explicit:
+            return self
+        from .face.calibration import default_threshold
+
+        return self.model_copy(update={"match_threshold": default_threshold(engine_name)})
 
     @field_validator("anchor_backend")
     @classmethod
@@ -140,6 +157,8 @@ class Settings(BaseModel):
             data["google_credentials"] = v
         if (v := pick(f"{_ENV_PREFIX}HTTP_CONTACT")) is not None:
             data["http_contact"] = v
+        if (v := pick(f"{_ENV_PREFIX}ALLOW_PUBLIC_PROBE_HOST")) is not None:
+            data["allow_public_probe_host"] = v.strip().lower() in {"1", "true", "yes", "on"}
         if (v := pick(f"{_ENV_PREFIX}ANCHOR_BACKEND")) is not None:
             data["anchor_backend"] = v
         if (v := pick(f"{_ENV_PREFIX}CHAIN_DIFFICULTY_BITS")) is not None:
@@ -154,6 +173,10 @@ class Settings(BaseModel):
             data["evm_chain_id"] = int(v)
 
         data.update({k: v for k, v in overrides.items() if v is not None})
+        # Remember whether the operator pinned a threshold; if not, the pipeline
+        # substitutes the calibrated per-engine default once the engine is known.
+        if "match_threshold" in data:
+            data["threshold_explicit"] = True
         try:
             return cls(**data)
         except Exception as exc:

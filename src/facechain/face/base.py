@@ -10,13 +10,20 @@ import numpy as np
 
 @dataclass(frozen=True)
 class DetectedFace:
-    """An axis-aligned face box in pixel coordinates."""
+    """An axis-aligned face box in pixel coordinates.
+
+    ``landmarks`` -- when a detector provides them -- is five ``(x, y)`` points in
+    image pixels, ordered right-eye, left-eye, nose, right-mouth, left-mouth
+    (the RetinaFace / YuNet convention). Alignment-aware engines use them; the
+    rest ignore them.
+    """
 
     x: int
     y: int
     w: int
     h: int
     det_score: float = 1.0
+    landmarks: tuple[tuple[float, float], ...] | None = None
 
     @property
     def area(self) -> int:
@@ -31,7 +38,7 @@ class DetectedFace:
         y = max(0, min(int(self.y), height - 1))
         w = max(1, min(int(self.w), width - x))
         h = max(1, min(int(self.h), height - y))
-        return DetectedFace(x, y, w, h, self.det_score)
+        return DetectedFace(x, y, w, h, self.det_score, self.landmarks)
 
 
 @dataclass

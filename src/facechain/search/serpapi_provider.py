@@ -52,6 +52,13 @@ class SerpApiProvider:
         probe_url = (probe.extra.get("probe_image_url") or "").strip()
         hosted = False
         if not probe_url:
+            if not probe.settings.allow_public_probe_host:
+                LOG.warning(
+                    "search.serpapi.skipped",
+                    reason="no probe_image_url and public hosting is disabled; "
+                    "pass --probe-image-url or --allow-public-host to enable Lens",
+                )
+                return []
             try:
                 probe_url = host_probe_image(
                     probe.image_bytes,

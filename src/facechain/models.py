@@ -84,9 +84,13 @@ class Candidate(StrictModel):
 
 class MatchResult(StrictModel):
     threshold_ppm: int
-    decided_by: Literal["embedding_cosine"] = "embedding_cosine"
+    # "embedding_cosine": winner is the top face-embedding score.
+    # "embedding_cosine+text_consensus": a scraped-name consensus promoted a
+    # lower-scoring but above-threshold candidate over the raw top score.
+    decided_by: Literal["embedding_cosine", "embedding_cosine+text_consensus"] = "embedding_cosine"
     ambiguous: bool = False
     ambiguity_note: str = ""
+    # Advisory only -- scraped from third-party page text, excluded from record_hash.
     identity_guess: str = ""
     identity_confidence_ppm: int = 0
     identity_note: str = ""
@@ -122,9 +126,21 @@ class EvidenceBundle(StrictModel):
     # Fields excluded from the notarised payload: ``record_hash`` is the output;
     # ``run_id`` is a local directory name; ``created_at`` is a wall-clock stamp
     # whose trusted version is supplied by the blockchain block/tx itself. The
-    # hash therefore covers the *finding* (probe + face + match), which makes it
-    # content-addressed and safely idempotent across re-runs.
-    _HASH_EXCLUDE: ClassVar[set[str]] = {"record_hash", "run_id", "created_at"}
+    # ``match.identity_*`` fields are an advisory name scraped from live
+    # third-party page text -- not part of the embedding decision -- so they are
+    # kept out of the hash to preserve byte-for-byte reproducibility. The hash
+    # therefore covers the *finding* (probe + face + embedding match), which
+    # makes it content-addressed and safely idempotent across re-runs.
+    _HASH_EXCLUDE: ClassVar[dict[str, Any]] = {
+        "record_hash": True,
+        "run_id": True,
+        "created_at": True,
+        "match": {
+            "identity_guess": True,
+            "identity_confidence_ppm": True,
+            "identity_note": True,
+        },
+    }
 
     def _payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude=self._HASH_EXCLUDE)
