@@ -2,10 +2,14 @@
 
 This is the provider that returns real *social-media* posts (Instagram, X,
 Facebook, LinkedIn, TikTok, ...). It needs a free SerpAPI key in
-``FACECHAIN_SERPAPI_KEY``. The probe image must be reachable by a URL: pass one
-via ``probe.extra["probe_image_url"]`` (e.g. an imgur/tmpfiles link you control),
-otherwise the provider is skipped with a clear log line -- SerpAPI cannot accept
-a raw upload.
+``FACECHAIN_SERPAPI_KEY``.
+
+SerpAPI cannot accept a raw upload — only a public image URL. Pass one via
+``probe.extra["probe_image_url"]`` / ``--probe-image-url``, **or** leave it
+unset and this provider will auto-host the probe on a short-lived public file
+host (catbox → litterbox → tmpfiles) before calling Google Lens. That is the
+standardized form of the path that identified hard cases (e.g. Elvish Yadav)
+where bare multiris/Yandex alone was noisy.
 
 The response parser is unit-tested against a recorded fixture so behaviour is
 pinned even without network.
@@ -20,6 +24,7 @@ from ..config import Settings
 from ..errors import ProviderError
 from ..logging import LOG
 from .base import ProbeContext, RawCandidate
+from .probe_host import host_probe_image
 
 _ENDPOINT = "https://serpapi.com/search.json"
 _SOCIAL_HOSTS = (
@@ -43,13 +48,25 @@ class SerpApiProvider:
         key = probe.settings.serpapi_key
         if not key:
             return []
-        probe_url = probe.extra.get("probe_image_url")
+
+        probe_url = (probe.extra.get("probe_image_url") or "").strip()
+        hosted = False
         if not probe_url:
-            LOG.warning(
-                "search.serpapi.skipped",
-                reason="no probe_image_url; SerpAPI needs a public URL for the probe",
-            )
-            return []
+            try:
+                probe_url = host_probe_image(
+                    probe.image_bytes,
+                    timeout_s=max(30.0, float(probe.settings.http_timeout_s)),
+                )
+                hosted = True
+                # Cache so a second provider / retry in the same run can reuse it.
+                probe.extra["probe_image_url"] = probe_url
+                probe.extra["probe_image_hosted"] = "1"
+            except Exception as exc:
+                LOG.warning(
+                    "search.serpapi.skipped",
+                    reason=f"auto-host failed: {exc}",
+                )
+                return []
 
         params = {
             "engine": self._engine,
@@ -63,7 +80,13 @@ class SerpApiProvider:
             raise ProviderError(f"serpapi request failed: {exc}") from exc
 
         candidates = list(self.parse(data, provider=self.name))
-        LOG.info("search.serpapi", engine=self._engine, candidates=len(candidates))
+        LOG.info(
+            "search.serpapi",
+            engine=self._engine,
+            candidates=len(candidates),
+            hosted=hosted,
+            probe_url=probe_url,
+        )
         return candidates[: probe.settings.max_candidates_per_provider]
 
     @staticmethod
@@ -71,7 +94,13 @@ class SerpApiProvider:
         if not isinstance(data, dict):
             return []
         rows: list[dict[str, Any]] = []
-        for field_name in ("visual_matches", "image_results", "inline_images", "organic_results"):
+        for field_name in (
+            "visual_matches",
+            "image_results",
+            "images_results",
+            "inline_images",
+            "organic_results",
+        ):
             node = data.get(field_name)
             if isinstance(node, list):
                 rows.extend(x for x in node if isinstance(x, dict))

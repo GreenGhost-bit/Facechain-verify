@@ -134,6 +134,37 @@ class SafeFetcher:
         resp.raise_for_status()
         return resp.json()
 
+    # -- HTML (for hint / profile page meta tags) -----------------------
+    def get_html(self, url: str, *, max_bytes: int = 2_000_000) -> str:
+        """Fetch an HTML document with redirect re-validation and a size cap."""
+        current = url
+        for hop in range(self._max_redirects + 1):
+            assert_url_is_safe(current)
+            with self._client.stream(
+                "GET",
+                current,
+                headers={"Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"},
+            ) as resp:
+                if resp.is_redirect:
+                    location = resp.headers.get("location", "")
+                    if not location:
+                        raise UnsafeURLError("redirect without Location", detail=current)
+                    current = str(httpx.URL(current).join(location))
+                    LOG.debug("netfetch.redirect", hop=hop, to=current)
+                    continue
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise UnsafeURLError(
+                            f"HTML response exceeds {max_bytes} bytes", detail=current
+                        )
+                    chunks.append(chunk)
+                return b"".join(chunks).decode("utf-8", errors="replace")
+        raise UnsafeURLError(f"too many redirects (> {self._max_redirects})", detail=url)
+
     # -- images ---------------------------------------------------------
     def fetch_image(self, url: str) -> FetchResult:
         """Fetch an image with full redirect re-validation and a streamed cap."""

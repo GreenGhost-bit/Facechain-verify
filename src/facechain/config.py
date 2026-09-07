@@ -17,6 +17,15 @@ from .errors import ConfigError
 
 _ENV_PREFIX = "FACECHAIN_"
 
+# Default search stack for search/run: Lens (auto-host) + multiris + keyless fallbacks.
+# Unavailable providers are skipped at build time — see search.factory.build_providers.
+ROBUST_SEARCH_PROVIDERS: tuple[str, ...] = (
+    "serpapi",
+    "multiris",
+    "wikimedia",
+    "local",
+)
+
 
 def load_dotenv(path: str | os.PathLike[str] = ".env") -> dict[str, str]:
     """Parse a minimal ``KEY=VALUE`` .env file. Missing file -> empty dict."""
@@ -57,7 +66,9 @@ class Settings(BaseModel):
     ambiguous_margin: float = Field(default=0.04, ge=0.0, le=1.0)
 
     # -- search --------------------------------------------------------
-    search_providers: tuple[str, ...] = Field(default=("wikimedia", "local"))
+    # Robust default: Lens (auto-host) + multiris + keyless fallbacks.
+    # Unavailable providers are skipped at build time.
+    search_providers: tuple[str, ...] = Field(default=ROBUST_SEARCH_PROVIDERS)
     max_candidates_per_provider: int = Field(default=12, ge=1, le=100)
     serpapi_key: str | None = None
     google_credentials: str | None = None

@@ -89,12 +89,25 @@ input. The best one wins *only if* its similarity clears a threshold (default
 audit exactly why a candidate won.
 
 Providers included:
-- **`wikimedia`** (default, no API key) — runs a real search against the live
-  Wikimedia Commons API and pulls back real image files and their web pages.
-- **`local`** (default, offline) — searches a folder of images you built earlier
-  with `facechain fetch-corpus` (that folder is itself filled from the live web).
-- **`serpapi`** (optional, free API key) — true reverse‑image search via Google
-  Lens / Yandex; returns real **social‑media** posts (Instagram, X, etc.).
+- **`serpapi`** (optional, free API key) — Google Lens reverse‑image. If you
+  omit `--probe-image-url`, the probe is **auto‑hosted** then sent to Lens.
+  **First in the default stack** — best for social / celebrity photos.
+- **`multiris`** (optional, `pip install -e ".[ris]"`) — Yandex / Bing / TinEye /
+  Google Lens via file upload (second opinion).
+- **`wikimedia`** (keyless) — live Wikimedia Commons API.
+- **`local`** — offline corpus from `facechain fetch-corpus`.
+- **`hint`** (auto‑enabled with `--hint`) — name / profile URL → headshot
+  candidates when reverse image never indexed the person.
+
+Default for `search` / `run`: **`serpapi,multiris,wikimedia,local`**. Anything
+missing a key or dependency is skipped automatically. Face engine **`auto`**
+picks InsightFace when installed (match threshold defaults to `0.45`).
+
+For candid / soft phone photos the probe is optionally **clarity‑enhanced**
+(contrast + mild sharpen, small upscale) when detection is weak. Ranked Lens
+hits are scanned for a repeated name/@handle (**identity consensus**) so the
+CLI can print a `WHO` line, and a lone high‑scoring Yandex lookalike is less
+likely to beat a strong Google Lens name cluster.
 
 ### Stage 3 — Blockchain verification
 Once a match is found, the pipeline builds an **evidence bundle**: a single JSON
@@ -244,18 +257,13 @@ settings. If you see that, you're ready.
 ## 60‑second quick start
 
 ```bash
-# build a small offline image corpus from the bundled public‑domain photos
+# Offline demo (explicit local corpus)
 python -m facechain fetch-corpus --seed-demo
-
-# run the whole pipeline on a sample "reposted" photo
 python -m facechain run samples/probe_repost.jpg --providers local --anchor local
 
-# independently re‑verify the run that just happened
-python -m facechain verify runs/<paste-the-run-id-it-printed> --no-network
-
-# prove the ledger is tamper‑evident
-python -m facechain chain tamper
-python -m facechain chain verify        # -> CHAIN INTEGRITY: FAILED (names the block)
+# Robust live identify (default stack: serpapi + multiris + fallbacks)
+# Needs FACECHAIN_SERPAPI_KEY in .env; InsightFace used automatically when installed.
+python -m facechain search samples/3.png
 ```
 
 Or run the whole scripted demo in one go:
@@ -383,16 +391,47 @@ If nothing clears the threshold you'll see `NO MATCH` and a `no_match` status �
 that is a **feature**: the pipeline does not invent a match. Try a more specific
 `--hint`, or add `--threshold 0.80` to loosen it.
 
+### With multi‑engine reverse image search (PicImageSearch, optional)
+
+Install the reverse‑image extra (Yandex + Bing + TinEye + Google Lens). Unlike
+SerpAPI, this path **uploads the probe file directly** — no public URL needed:
+
+```
+python -m pip install -e ".[ris,insightface]"
+
+python -m facechain search ./my_face.jpg \
+  --engine insightface \
+  --providers multiris
+```
+
+With `--engine insightface` the default match threshold becomes `0.45` (ArcFace
+same‑person scores are lower than OpenCV same‑photo scores). Override with
+`--threshold` or `FACECHAIN_MATCH_THRESHOLD` if you need to.
+
+This still only finds **public, indexed** pages. Private Instagram / Facebook
+posts are not reachable. You can combine providers:
+`--providers multiris,serpapi,wikimedia`.
+
 ### With true social‑media results (SerpAPI, optional)
 
-SerpAPI's reverse‑image endpoints need your probe image to be reachable at a
-public URL (they can't take an upload). Get a free key at
-<https://serpapi.com> (no card required), then:
+
+SerpAPI Google Lens needs a crawlable probe URL. Get a free key at
+<https://serpapi.com> (no card required). You can either pass
+`--probe-image-url`, **or omit it** and facechain will auto‑host the probe
+(catbox → litterbox → tmpfiles) before calling Lens:
 
 ```
 # Windows PowerShell:  $env:FACECHAIN_SERPAPI_KEY = "your-key"
 # macOS / Linux:        export FACECHAIN_SERPAPI_KEY="your-key"
 
+python -m facechain search ./my_face.jpg \
+  --engine insightface \
+  --providers serpapi,multiris
+```
+
+Optional explicit URL (skips auto‑host):
+
+```
 python -m facechain run ./my_face.jpg \
   --providers serpapi,wikimedia \
   --probe-image-url https://<a-public-url-of-my_face.jpg> \
@@ -454,7 +493,8 @@ Every `run` creates one self‑describing folder:
 | `evidence.json` | The **evidence bundle** that was notarised. Its canonical SHA‑256 is the `record_hash` stored inside it. |
 | `receipt.json` | Proof of anchoring: for `local`, the block index/hash/Merkle root + inclusion proof; for `evm`, the transaction hash, block number, chain id. |
 | `verification.json` | The automatic re‑verification result (same as `facechain verify` prints). |
-| `telemetry.jsonl` | One JSON line per pipeline step with millisecond timings. |
+| `telemetry.jsonl` | One JSON line per step (machine-readable timings). |
+| `run.log` | Plain-text timeline of the same events — `tail -f runs/<id>/run.log`. |
 
 ---
 
@@ -532,9 +572,10 @@ Run `python -m facechain <command> --help` for full flags.
 | `facechain version` | Print version + effective configuration. |
 
 **Common flags** (most commands): `--engine {opencv,numpy,insightface}`,
-`--providers wikimedia,local,serpapi`, `--anchor {local,evm}`,
-`--threshold 0.86`, `--difficulty 0`, `--hint "text"`,
-`--probe-image-url URL`, `--runs-dir`, `--chain-dir`, `--corpus-dir`, `--json`.
+`--providers wikimedia,local,serpapi,multiris`, `--anchor {local,evm}`,
+`--threshold 0.86` (opencv) / `0.45` (insightface default), `--difficulty 0`,
+`--hint "text"`, `--probe-image-url URL`, `--runs-dir`, `--chain-dir`,
+`--corpus-dir`, `--json`.
 
 ---
 
@@ -552,10 +593,18 @@ automatically, and `.env` is git‑ignored).
 | `FACECHAIN_EVM_RPC_URL` | JSON‑RPC endpoint for `--anchor evm`. |
 | `FACECHAIN_EVM_PRIVATE_KEY` | Funded **testnet** key for `--anchor evm`. Never a mainnet key. |
 | `FACECHAIN_EVM_REGISTRY_ADDRESS` | Optional deployed `EvidenceRegistry` address (switches evm to contract mode). |
-| `FACECHAIN_MATCH_THRESHOLD` | Override the `0.86` similarity threshold. |
-| `FACECHAIN_SEARCH_PROVIDERS` | Comma‑separated default provider list. |
+| `FACECHAIN_MATCH_THRESHOLD` | Override similarity threshold (defaults: `0.86` opencv, `0.45` insightface). |
+| `FACECHAIN_SEARCH_PROVIDERS` | Default provider list (`serpapi,multiris,wikimedia,local`). Unavailable ones are skipped. |
 | `FACECHAIN_LOG_LEVEL` | `debug` \| `info` (default) \| `warning` \| `error`. |
 | `FACECHAIN_LOG_JSON=1` | Force machine‑readable JSON logs. |
+
+Optional extras (pip):
+
+```
+python -m pip install -e ".[insightface]"   # ArcFace face engine
+python -m pip install -e ".[ris]"           # multiris: Yandex/Bing/TinEye/Google Lens
+python -m pip install -e ".[evm]"           # real testnet anchoring
+```
 
 ---
 
@@ -595,7 +644,7 @@ face/ ───────── FaceEngine protocol
    │              └─ insightface_backend.py (optional ArcFace)
    │            cascade.py: gets the Haar model from OpenCV, or a bundled .gz
    ▼
-search/ ─────── SearchProvider protocol → serpapi | wikimedia | local_index
+search/ ─────── SearchProvider protocol → serpapi | multiris | hint | wikimedia | local_index
    │            aggregator.py: fetch every candidate (via SSRF‑guarded
    │            netfetch.py), encode its face, rank by cosine, apply threshold
    ▼
@@ -657,12 +706,31 @@ an end‑to‑end CLI smoke test on Python 3.11, 3.12 and 3.13.
   picture). Matching *two different photographs* of the same person (different
   pose / lighting / year) is **not reliable** with a classical descriptor —
   install the optional deep engine for that:
-  `python -m pip install -e ".[insightface]"` then add `--engine insightface`.
-- **SerpAPI needs a public URL for your probe image** — it can't accept an
-  upload. The `wikimedia` and `local` providers have no such limitation.
+  `python -m pip install -e ".[insightface]"` then add `--engine insightface`
+  (CLI then defaults the match threshold to `0.45`).
+- **Multi‑engine reverse search (`multiris`)** needs
+  `python -m pip install -e ".[ris]"`. It uploads the probe to Yandex / Bing /
+  TinEye / Google Lens (no public URL). Still cannot see private social posts —
+  only public indexed pages. Yandex often finds social/web copies that Google
+  Lens misses.
+- **LinkedIn (and similar) headshots are often not reverse‑image indexed.**
+  The face matcher only scores candidates the search engines return — if the
+  real profile photo never appears, you get a correct `NO MATCH`, not a wrong
+  ID. Bridge that with `--hint "Full Name"` or
+  `--hint https://www.linkedin.com/in/...` (auto‑enables the `hint` provider:
+  page `og:image` + SerpAPI Google Images). ArcFace still has to clear the
+  threshold; the hint only widens the pool.
+- **SerpAPI Google Lens** needs a public probe URL. If you omit
+  `--probe-image-url`, the `serpapi` provider **auto‑hosts** the probe
+  (catbox / litterbox / tmpfiles) and then calls Lens — use this for social /
+  celebrity look‑ups. `wikimedia`, `local`, `multiris`, and `hint` never need
+  a public probe URL. (`hint` uses SerpAPI's *text* image search when a key
+  is set.)
 - **Wikimedia is "the web", not "social media".** It gives a keyless, fully
-  reproducible search path. For literal Instagram/X/Facebook posts, use
-  `--providers serpapi`.
+  reproducible search path. For broader reverse‑image coverage use
+  `--providers multiris`; for SerpAPI Google Lens social hits use
+  `--providers serpapi` (auto‑host or `--probe-image-url`). For a known
+  name/profile when RIS fails, add `--hint "..."` (or `--providers …,hint`).
 - **Haar detection is frontal‑face only** and can occasionally return a spurious
   box; the pipeline picks the largest face and flags "ambiguous" when a
   runner‑up is a similar size.
@@ -774,7 +842,8 @@ facechain-verify/
 │  │           insightface_backend.py factory.py
 │  │  └─ models/haarcascade_frontalface_default.xml.gz   ← 135 KB, used only if OpenCV absent
 │  ├─ search/   base.py aggregator.py wikimedia_provider.py serpapi_provider.py
-│  │           local_index_provider.py factory.py
+│  │           multiris_provider.py hint_provider.py local_index_provider.py
+│  │           factory.py
 │  └─ anchor/   base.py merkle.py local_chain.py evm_backend.py factory.py
 ├─ tests/                        ← 99 tests + public‑domain fixture images
 └─ .github/workflows/ci.yml      ← lint + types + tests on Python 3.11/3.12/3.13
