@@ -27,16 +27,16 @@ from .errors import FaceChainError
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--engine", choices=["auto", "sface", "opencv", "numpy", "insightface"],
                    default=None,
-                   help="face engine (default: auto → insightface > sface > opencv > numpy)")
+                   help="face engine (default: auto -> insightface > sface > opencv > numpy)")
     p.add_argument("--providers", default=None,
                    help="comma-separated search providers "
-                        "(default: serpapi,multiris,wikimedia,local; "
+                        "(default: serpapi,multiris,wikimedia,faceindex; "
                         "unavailable ones are skipped)")
     p.add_argument("--anchor", choices=["local", "evm"], default=None,
                    help="blockchain anchor backend (default: local)")
     p.add_argument("--threshold", type=float, default=None,
                    help="face-match cosine threshold "
-                        "(default: calibrated per engine — sface 0.40, arcface 0.42, lbph 0.86)")
+                        "(default: calibrated per engine - sface 0.40, arcface 0.42, lbph 0.86)")
     p.add_argument("--allow-public-host", action="store_true",
                    help="permit uploading the probe to a public file host so SerpAPI "
                         "Lens can crawl it (off by default; needed only for serpapi "
@@ -756,6 +756,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to a legacy code page; make sure our output
+    # (help text, captions, log lines) never dies on a non-ASCII character.
+    import contextlib
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            with contextlib.suppress(ValueError, OSError):  # already-detached stream
+                reconfigure(encoding="utf-8", errors="replace")
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
