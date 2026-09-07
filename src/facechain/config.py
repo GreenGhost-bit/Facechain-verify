@@ -17,13 +17,15 @@ from .errors import ConfigError
 
 _ENV_PREFIX = "FACECHAIN_"
 
-# Default search stack for search/run: Lens (auto-host) + multiris + keyless fallbacks.
-# Unavailable providers are skipped at build time — see search.factory.build_providers.
+# Default search stack for search/run: Lens (auto-host) + multiris, then keyless
+# fallbacks -- a live web reverse-image search first, then the offline face-vector
+# index over the local corpus. Unavailable providers are skipped at build time
+# (see search.factory.build_providers).
 ROBUST_SEARCH_PROVIDERS: tuple[str, ...] = (
     "serpapi",
     "multiris",
     "wikimedia",
-    "local",
+    "faceindex",
 )
 
 

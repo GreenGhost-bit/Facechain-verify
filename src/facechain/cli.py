@@ -448,17 +448,39 @@ def _cmd_chain(args: argparse.Namespace) -> int:
 
 
 def _cmd_fetch_corpus(args: argparse.Namespace) -> int:
-    from .corpus import fetch_corpus, seed_demo_corpus
+    from .corpus import fetch_corpus, fetch_corpus_wikidata, seed_demo_corpus
 
     settings = _settings_from_args(args)
     if args.seed_demo:
         n = seed_demo_corpus(settings)
         print(f"seeded {n} demo entries into {settings.corpus_dir}")
         return 0
+    names = list(args.name or [])
+    if args.names_file:
+        names += [
+            ln.strip() for ln in Path(args.names_file).read_text("utf-8").splitlines()
+            if ln.strip() and not ln.startswith("#")
+        ]
+    if names:
+        n = fetch_corpus_wikidata(settings, names, overwrite=args.overwrite)
+        print(f"fetched {n}/{len(names)} Wikidata portraits into {settings.corpus_dir}")
+        return 0 if n > 0 else 1
     n = fetch_corpus(settings, queries=args.query or None, per_query=args.per_query,
                      overwrite=args.overwrite)
     print(f"fetched {n} corpus entries into {settings.corpus_dir}")
     return 0 if n > 0 else 1
+
+
+def _cmd_build_index(args: argparse.Namespace) -> int:
+    """Pre-encode the corpus into a face-embedding index for the 'faceindex' provider."""
+    from .face import build_face_engine
+    from .search.face_index import FaceIndex
+
+    settings = _settings_from_args(args)
+    engine = build_face_engine(settings.face_engine)
+    n = FaceIndex(settings.corpus_dir, engine).build(rebuild=bool(getattr(args, "rebuild", False)))
+    print(f"indexed {n} corpus face(s) for engine '{engine.name}' under {settings.corpus_dir}")
+    return 0
 
 
 def _cmd_fetch_models(args: argparse.Namespace) -> int:
@@ -534,8 +556,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("fetch-corpus", help="build the offline search corpus")
     _add_common(p)
-    p.add_argument("--query", action="append", help="repeatable search query")
+    p.add_argument("--query", action="append", help="repeatable Commons full-text query")
     p.add_argument("--per-query", type=int, default=3)
+    p.add_argument("--name", action="append",
+                   help="repeatable person name -> one canonical Wikidata P18 portrait")
+    p.add_argument("--names-file", default=None,
+                   help="text file of names (one per line) for Wikidata P18 lookup")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--seed-demo", action="store_true",
                    help="copy the repo's bundled public-domain fixtures instead of pulling live")
@@ -543,6 +569,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("fetch-models", help="pre-download the ONNX face models (YuNet + SFace)")
     p.set_defaults(func=_cmd_fetch_models)
+
+    p = sub.add_parser("build-index", help="encode the corpus into a face-embedding index")
+    _add_common(p)
+    p.add_argument("--rebuild", action="store_true", help="ignore cached vectors and re-encode all")
+    p.set_defaults(func=_cmd_build_index)
 
     p = sub.add_parser("version", help="print version + effective config")
     _add_common(p)

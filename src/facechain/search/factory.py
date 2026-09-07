@@ -6,6 +6,7 @@ from ..config import ROBUST_SEARCH_PROVIDERS, Settings
 from ..errors import ProviderError
 from ..logging import LOG
 from .base import SearchProvider
+from .face_index_provider import FaceIndexProvider
 from .hint_provider import HintProvider
 from .local_index_provider import LocalIndexProvider
 from .multiris_provider import MultiRisProvider
@@ -15,10 +16,14 @@ from .wikimedia_provider import WikimediaProvider
 _REGISTRY: dict[str, type[SearchProvider]] = {
     "serpapi": SerpApiProvider,
     "wikimedia": WikimediaProvider,
+    "faceindex": FaceIndexProvider,
     "local": LocalIndexProvider,
     "multiris": MultiRisProvider,
     "hint": HintProvider,
 }
+
+# Providers that take a corpus-dir constructor arg rather than no args.
+_CORPUS_PROVIDERS = {"local", "faceindex"}
 
 
 def build_providers(settings: Settings, *, strict: bool = False) -> list[SearchProvider]:
@@ -37,8 +42,8 @@ def build_providers(settings: Settings, *, strict: bool = False) -> list[SearchP
             skipped.append(name)
             LOG.warning("search.provider.unavailable", provider=name)
             continue
-        if name == "local":
-            built.append(LocalIndexProvider(settings.corpus_dir))
+        if name in _CORPUS_PROVIDERS:
+            built.append(cls(settings.corpus_dir))  # type: ignore[call-arg]
         else:
             built.append(cls())
     if not built:

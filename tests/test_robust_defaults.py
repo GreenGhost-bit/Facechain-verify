@@ -9,7 +9,7 @@ from facechain.search.factory import build_providers
 
 
 def test_robust_default_providers_constant() -> None:
-    assert ROBUST_SEARCH_PROVIDERS == ("serpapi", "multiris", "wikimedia", "local")
+    assert ROBUST_SEARCH_PROVIDERS == ("serpapi", "multiris", "wikimedia", "faceindex")
     s = Settings.load(env_file="/nonexistent")
     assert s.search_providers == ROBUST_SEARCH_PROVIDERS
 

@@ -24,6 +24,8 @@ from .logging import LOG
 from .netfetch import SafeFetcher
 
 _API = "https://commons.wikimedia.org/w/api.php"
+_WD_API = "https://www.wikidata.org/w/api.php"
+_COMMONS_FILEPATH = "https://commons.wikimedia.org/wiki/Special:FilePath/"
 _DEFAULT_QUERIES = (
     "Barack Obama official portrait",
     "Angela Merkel portrait",
@@ -123,6 +125,106 @@ def fetch_corpus(
                 saved += 1
                 LOG.info("corpus.saved", file=target.name, from_query=query)
     LOG.info("corpus.done", saved=saved, dir=str(dest))
+    return saved
+
+
+def _wikidata_p18(fetcher: SafeFetcher, name: str) -> tuple[str, str, str] | None:
+    """Resolve ``name`` -> (entity_id, P18 image filename, entity_url) via Wikidata.
+
+    This is a precise, one-portrait-per-person lookup: the P18 ("image") claim on
+    the person's Wikidata item, which is what infoboxes use.
+    """
+    try:
+        found = fetcher.get_json(
+            _WD_API,
+            params={
+                "action": "wbsearchentities", "format": "json",
+                "language": "en", "type": "item", "limit": "1", "search": name,
+            },
+        )
+    except Exception as exc:
+        LOG.warning("corpus.wikidata.search_failed", name=name, error=str(exc))
+        return None
+    hits = found.get("search", []) if isinstance(found, dict) else []
+    if not hits:
+        LOG.info("corpus.wikidata.no_entity", name=name)
+        return None
+    qid = str(hits[0].get("id", ""))
+    if not qid:
+        return None
+    try:
+        claims = fetcher.get_json(
+            _WD_API,
+            params={
+                "action": "wbgetclaims", "format": "json",
+                "entity": qid, "property": "P18",
+            },
+        )
+    except Exception as exc:
+        LOG.warning("corpus.wikidata.claims_failed", qid=qid, error=str(exc))
+        return None
+    p18 = (claims.get("claims", {}) or {}).get("P18", []) if isinstance(claims, dict) else []
+    for claim in p18:
+        try:
+            filename = claim["mainsnak"]["datavalue"]["value"]
+        except (KeyError, TypeError):
+            continue
+        if isinstance(filename, str) and filename:
+            return qid, filename, f"https://www.wikidata.org/wiki/{qid}"
+    LOG.info("corpus.wikidata.no_p18", qid=qid, name=name)
+    return None
+
+
+def fetch_corpus_wikidata(
+    settings: Settings, names: list[str], *, overwrite: bool = False
+) -> int:
+    """Populate the corpus with one canonical portrait per named person (Wikidata P18)."""
+    dest = settings.corpus_dir
+    dest.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    with SafeFetcher(
+        contact=settings.http_contact,
+        timeout_s=settings.http_timeout_s,
+        max_redirects=settings.http_max_redirects,
+        max_bytes=settings.max_image_bytes,
+    ) as fetcher:
+        for name in names:
+            name = name.strip()
+            if not name:
+                continue
+            resolved = _wikidata_p18(fetcher, name)
+            if resolved is None:
+                continue
+            qid, filename, entity_url = resolved
+            slug = _slug(f"{name}-{qid}")
+            existing = list(dest.glob(f"{slug}.*"))
+            if existing and not overwrite:
+                continue
+            url = _COMMONS_FILEPATH + filename.replace(" ", "_")
+            try:
+                fetched = fetcher.fetch_image(url)
+                loaded = load_image_bytes(fetched.content, source=url)
+            except Exception as exc:
+                LOG.warning("corpus.wikidata.download_failed", name=name, url=url, error=str(exc))
+                continue
+            ext = _ext(loaded.fingerprint.mime)
+            target = dest / f"{slug}{ext}"
+            target.write_bytes(fetched.content)
+            target.with_suffix(".json").write_text(
+                json.dumps(
+                    {
+                        "post_url": entity_url,
+                        "title": name,
+                        "source": f"Wikidata {qid} P18 (Wikimedia Commons)",
+                        "wikidata": qid,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            saved += 1
+            LOG.info("corpus.wikidata.saved", name=name, qid=qid, file=target.name)
+    LOG.info("corpus.wikidata.done", saved=saved, requested=len(names), dir=str(dest))
     return saved
 
 

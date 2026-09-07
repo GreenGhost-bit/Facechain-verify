@@ -23,9 +23,17 @@ submission.
   - Notarised-evidence integrity restored: `identity_*` out of `record_hash`
     (re-runs reproducible again), honest `decided_by`, opt-in public probe host.
   - All ruff + mypy(strict) errors from the merge cleared; 136 tests green.
-- ⏳ **Phase 2** — web identification: wire SerpAPI Lens as primary (probe
-  auto-host behind the new opt-in), add FAISS/hnswlib local face-vector index
-  over a Wikimedia + Wikidata-P18 corpus as the deterministic fallback.
+- ✅ **Phase 2 done** — web identification:
+  - `faceindex` provider + `facechain build-index`: persisted brute-force
+    face-embedding index over the corpus (`.faceindex/<engine>.npz`), keyed by
+    image content hash; retrieves top-K by cosine, forwards only those. No FAISS
+    dep needed at this corpus scale. Verified: `probe_obama.jpg` matches a
+    *different* live-fetched Wikidata portrait of Obama at cos 0.81 → full
+    pipeline VERIFIED 10/10.
+  - `facechain fetch-corpus --name / --names-file`: Wikidata **P18** lookup, one
+    canonical portrait per person → real identities in the offline index.
+  - Default stack `serpapi, multiris, wikimedia, faceindex`; SerpAPI stays
+    primary when a key is present, `faceindex` is the deterministic fallback.
 - ⏳ **Phase 3** — local VLM captioner (`facechain describe`): torch + a small
   BLIP/Florence-class model, first-run download, offline after. Free-text caption
   + attributes; kept separate from the face decision and the record hash.

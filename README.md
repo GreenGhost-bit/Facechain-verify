@@ -99,14 +99,23 @@ input. The best one wins *only if* its similarity clears a threshold (default
 `0.86`). The full ranked list with every score is saved to disk, so you can
 audit exactly why a candidate won.
 
-Providers included:
-- **`serpapi`** (optional, free API key) — Google Lens reverse‑image. If you
-  omit `--probe-image-url`, the probe is **auto‑hosted** then sent to Lens.
-  **First in the default stack** — best for social / celebrity photos.
+Providers included (default stack: `serpapi, multiris, wikimedia, faceindex`):
+- **`serpapi`** (optional, free API key) — Google Lens reverse‑image, the primary
+  web source. Needs a public probe URL: pass `--probe-image-url`, or opt in with
+  `--allow-public-host` / `FACECHAIN_ALLOW_PUBLIC_PROBE_HOST` to auto‑host the
+  probe on a short‑lived file host. Best for social / celebrity photos.
 - **`multiris`** (optional, `pip install -e ".[ris]"`) — Yandex / Bing / TinEye /
   Google Lens via file upload (second opinion).
-- **`wikimedia`** (keyless) — live Wikimedia Commons API.
-- **`local`** — offline corpus from `facechain fetch-corpus`.
+- **`wikimedia`** (keyless) — live Wikimedia Commons full‑text search.
+- **`faceindex`** (keyless, offline, deterministic) — a persisted **face‑vector
+  index** over the local corpus. `facechain build-index` encodes every corpus
+  face once; at query time it ranks by embedding cosine and forwards only the
+  top‑K. Build the corpus from canonical portraits with
+  `facechain fetch-corpus --name "Ada Lovelace" --name "…"` (Wikidata **P18**,
+  one portrait per person) or `--names-file people.txt`. This is the
+  always‑works web‑sourced path for anyone with a public encyclopedic presence.
+- **`local`** — the older "forward the whole corpus" provider; `faceindex`
+  supersedes it.
 - **`hint`** (auto‑enabled with `--hint`) — name / profile URL → headshot
   candidates when reverse image never indexed the person.
 
