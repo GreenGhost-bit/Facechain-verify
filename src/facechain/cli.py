@@ -26,22 +26,35 @@ from .errors import FaceChainError
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--engine", choices=["auto", "opencv", "numpy", "insightface"], default=None,
-                   help="face engine (default: auto)")
+                   help="face engine (default: auto → insightface when installed)")
     p.add_argument("--providers", default=None,
-                   help="comma-separated search providers (default: wikimedia,local)")
+                   help="comma-separated search providers "
+                        "(default: serpapi,multiris,wikimedia,local; "
+                        "unavailable ones are skipped)")
     p.add_argument("--anchor", choices=["local", "evm"], default=None,
                    help="blockchain anchor backend (default: local)")
     p.add_argument("--threshold", type=float, default=None,
-                   help="face-match cosine threshold (default: 0.86)")
+                   help="face-match cosine threshold "
+                        "(default: 0.86 opencv / 0.45 insightface)")
     p.add_argument("--difficulty", type=int, default=None,
                    help="local-chain proof-of-work leading zero bits (default: 0)")
     p.add_argument("--runs-dir", default=None)
     p.add_argument("--chain-dir", default=None)
     p.add_argument("--corpus-dir", default=None)
-    p.add_argument("--hint", default=None, help="text hint (a name/keywords) to focus the search")
+    p.add_argument("--hint", default=None,
+                   help="name or profile URL; focuses Wikimedia and auto-enables "
+                        "the 'hint' provider (og:image + Google Images candidates)")
     p.add_argument("--probe-image-url", default=None,
-                   help="public URL of the probe image (required by the serpapi provider)")
+                   help="public URL of the probe image for serpapi "
+                        "(optional: auto-hosted on catbox/tmpfiles if omitted)")
     p.add_argument("--json", action="store_true", help="emit machine-readable JSON on stdout")
+
+
+# ArcFace same-person scores are typically much lower than OpenCV same-photo scores.
+_INSIGHTFACE_DEFAULT_THRESHOLD = 0.45
+# When multiris / SerpAPI Lens fans out, score a longer tail of candidates.
+_MULTIRIS_MIN_PER_PROVIDER = 24
+_SERPAPI_MIN_PER_PROVIDER = 36
 
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:
@@ -52,7 +65,8 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         overrides["search_providers"] = args.providers
     if getattr(args, "anchor", None):
         overrides["anchor_backend"] = args.anchor
-    if getattr(args, "threshold", None) is not None:
+    threshold_explicit = getattr(args, "threshold", None) is not None
+    if threshold_explicit:
         overrides["match_threshold"] = args.threshold
     if getattr(args, "difficulty", None) is not None:
         overrides["chain_difficulty_bits"] = args.difficulty
@@ -62,7 +76,75 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         overrides["chain_dir"] = Path(args.chain_dir)
     if getattr(args, "corpus_dir", None):
         overrides["corpus_dir"] = Path(args.corpus_dir)
-    return Settings.load(**overrides)
+
+    settings = Settings.load(**overrides)
+    # Main pipeline defaults: ArcFace threshold + Lens/multiris candidate budgets.
+    settings = _apply_insightface_threshold(settings, threshold_explicit=threshold_explicit)
+    settings = _apply_search_candidate_budgets(settings)
+    return _ensure_hint_provider(settings, getattr(args, "hint", None))
+
+
+def _ensure_hint_provider(settings: Settings, hint: str | None) -> Settings:
+    """When ``--hint`` is set, append the hint provider if the user omitted it."""
+    if not hint or not str(hint).strip():
+        return settings
+    if "hint" in settings.search_providers:
+        return settings
+    return settings.with_(search_providers=(*settings.search_providers, "hint"))
+
+
+def _apply_insightface_threshold(settings: Settings, *, threshold_explicit: bool) -> Settings:
+    """Default match threshold to 0.45 when the effective face engine is ArcFace."""
+    if threshold_explicit:
+        return settings
+    import os
+
+    from .config import load_dotenv
+
+    # Honour an explicit env / .env override even when --threshold is omitted.
+    env = load_dotenv()
+    if env.get("FACECHAIN_MATCH_THRESHOLD") or os.environ.get("FACECHAIN_MATCH_THRESHOLD"):
+        return settings
+
+    # Import-only check — do not load the ONNX pack just to pick a default threshold.
+    try:
+        import insightface  # noqa: F401
+        import onnxruntime  # noqa: F401
+
+        insightface_installed = True
+    except Exception:
+        insightface_installed = False
+
+    uses_arcface = settings.face_engine == "insightface" or (
+        settings.face_engine == "auto" and insightface_installed
+    )
+    if uses_arcface:
+        return settings.with_(match_threshold=_INSIGHTFACE_DEFAULT_THRESHOLD)
+    return settings
+
+
+def _apply_search_candidate_budgets(settings: Settings) -> Settings:
+    """Raise scoring budgets when Lens / multiris are in the configured stack."""
+    settings = _apply_multiris_candidate_budget(settings)
+    return _apply_serpapi_candidate_budget(settings)
+
+
+def _apply_multiris_candidate_budget(settings: Settings) -> Settings:
+    """Raise per-provider candidate cap when the multi-engine RIS provider is active."""
+    if "multiris" not in settings.search_providers:
+        return settings
+    if settings.max_candidates_per_provider >= _MULTIRIS_MIN_PER_PROVIDER:
+        return settings
+    return settings.with_(max_candidates_per_provider=_MULTIRIS_MIN_PER_PROVIDER)
+
+
+def _apply_serpapi_candidate_budget(settings: Settings) -> Settings:
+    """Raise per-provider candidate cap for SerpAPI Google Lens (often 40–60 visual matches)."""
+    if "serpapi" not in settings.search_providers:
+        return settings
+    if settings.max_candidates_per_provider >= _SERPAPI_MIN_PER_PROVIDER:
+        return settings
+    return settings.with_(max_candidates_per_provider=_SERPAPI_MIN_PER_PROVIDER)
 
 
 # --------------------------------------------------------------------------
@@ -99,47 +181,160 @@ def _cmd_identify(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_closest_near_miss(detail: object) -> None:
+    """Print the strongest below-threshold hit when search returns NO MATCH."""
+    if not isinstance(detail, dict):
+        return
+    closest = detail.get("closest")
+    ranked = detail.get("ranked") or []
+    if not isinstance(closest, dict) and ranked:
+        top = ranked[0] if isinstance(ranked[0], dict) else None
+        if top:
+            closest = {
+                "similarity": (top.get("similarity_ppm") or 0) / 1e6,
+                "provider": top.get("provider"),
+                "title": top.get("title"),
+                "post_url": top.get("post_url"),
+                "image_url": top.get("image_url"),
+            }
+    if not isinstance(closest, dict):
+        return
+    sim = closest.get("similarity")
+    try:
+        sim_s = f"{float(sim):.4f}"
+    except (TypeError, ValueError):
+        sim_s = str(sim)
+    print(f"CLOSEST      sim={sim_s}  [{closest.get('provider') or '?'}]", flush=True)
+    if closest.get("title"):
+        print(f"             {closest['title']}", flush=True)
+    if closest.get("post_url"):
+        print(f"             source: {closest['post_url']}", flush=True)
+    if closest.get("image_url"):
+        print(f"             image:  {closest['image_url']}", flush=True)
+    who = detail.get("identity_guess") or ""
+    if who:
+        conf = detail.get("identity_confidence")
+        conf_s = f"  (consensus {float(conf):.2f})" if conf is not None else ""
+        print(f"WHO (near)   {who}{conf_s}", flush=True)
+    for i, row in enumerate(ranked[1:4] if isinstance(ranked, list) else []):
+        if not isinstance(row, dict):
+            continue
+        rsim = (row.get("similarity_ppm") or 0) / 1e6
+        print(
+            f"  runner-up {i + 2}: sim={rsim:+.4f}  [{row.get('provider')}]  "
+            f"{(row.get('title') or '')[:50]}  {row.get('post_url')}",
+            flush=True,
+        )
+
+
 def _cmd_search(args: argparse.Namespace) -> int:
     from .face import build_face_engine, encode_probe
     from .imaging import load_image_path
+    from .logging import LOG, open_run_logs
     from .netfetch import SafeFetcher
+    from .pipeline import _run_id, _save_json
     from .search import ProbeContext, SearchAggregator, build_providers
 
     settings = _settings_from_args(args)
-    image = load_image_path(args.image, max_bytes=settings.max_image_bytes,
-                            max_pixels=settings.max_image_pixels)
-    engine = build_face_engine(settings.face_engine)
-    _, embedding, _ = encode_probe(image, engine=engine, min_face_pixels=settings.min_face_pixels)
-    providers = build_providers(settings)
-    with SafeFetcher(contact=settings.http_contact, timeout_s=settings.http_timeout_s,
-                     max_redirects=settings.http_max_redirects,
-                     max_bytes=settings.max_image_bytes) as fetcher:
-        ctx = ProbeContext(image_bytes=image.raw_bytes, rgb=image.rgb, embedding=embedding,
-                           settings=settings, fetcher=fetcher, face_engine=engine, hint=args.hint,
-                           extra={"probe_image_url": args.probe_image_url} if args.probe_image_url else {})
-        try:
-            result = SearchAggregator(providers).run(ctx)
-        except FaceChainError as exc:
-            if args.json:
-                print(json.dumps({"error": exc.code, "message": str(exc)}, indent=2))
-            else:
-                print(f"NO MATCH: {exc}", file=sys.stderr)
-            return exc.exit_code
+    input_path = Path(args.image)
+    run_id = _run_id(input_path)
+    run_dir = settings.runs_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    bundle_logs = open_run_logs(run_dir)
+    LOG.attach_run_logs(bundle_logs)
+    LOG.info(
+        "search.start",
+        input=str(input_path),
+        run_dir=str(run_dir),
+        run_log=str(bundle_logs.run_log_path),
+        telemetry=str(bundle_logs.telemetry_path),
+        providers=list(settings.search_providers),
+        engine=settings.face_engine,
+        threshold=settings.match_threshold,
+    )
+    if not args.json:
+        print(f"run dir       : {run_dir}", flush=True)
+        print(f"live log      : {bundle_logs.run_log_path}", flush=True)
+        print(f"              (tail -f {bundle_logs.run_log_path})", flush=True)
 
-    if args.json:
-        print(result.match.model_dump_json(indent=2))
-    else:
-        print(f"scored {result.summary.candidates_scored} candidate(s) "
-              f"from {', '.join(result.summary.providers_ok) or 'no providers'}")
-        for m in result.match.ranked[:10]:
-            print(f"  #{m.rank:<2} sim={m.similarity_ppm / 1e6:+.4f}  [{m.provider}]  {m.post_url}")
-            if m.note:
-                print(f"       note: {m.note}")
-        b = result.match.best
-        print(f"\nBEST MATCH  sim={b.similarity_ppm / 1e6:.4f}  {b.post_url}")
-        if result.match.ambiguous:
-            print(f"AMBIGUOUS   {result.match.ambiguity_note}")
-    return 0
+    exit_code = 0
+    try:
+        image = load_image_path(args.image, max_bytes=settings.max_image_bytes,
+                                max_pixels=settings.max_image_pixels)
+        LOG.info("search.probe_loaded", bytes=len(image.raw_bytes),
+                 size=f"{image.fingerprint.width}x{image.fingerprint.height}")
+        engine = build_face_engine(settings.face_engine)
+        _, embedding, _ = encode_probe(image, engine=engine, min_face_pixels=settings.min_face_pixels)
+        providers = build_providers(settings)
+        with SafeFetcher(contact=settings.http_contact, timeout_s=settings.http_timeout_s,
+                         max_redirects=settings.http_max_redirects,
+                         max_bytes=settings.max_image_bytes) as fetcher:
+            ctx = ProbeContext(image_bytes=image.raw_bytes, rgb=image.rgb, embedding=embedding,
+                               settings=settings, fetcher=fetcher, face_engine=engine, hint=args.hint,
+                               extra={"probe_image_url": args.probe_image_url} if args.probe_image_url else {})
+            try:
+                result = SearchAggregator(providers).run(ctx)
+            except FaceChainError as exc:
+                _save_json(run_dir / "no_match_debug.json", {
+                    "error": exc.code,
+                    "message": str(exc),
+                    "detail": exc.detail if isinstance(exc.detail, (dict, list, str, type(None))) else repr(exc.detail),
+                })
+                LOG.warning("search.no_match", error=str(exc), run_dir=str(run_dir))
+                if args.json:
+                    print(json.dumps({
+                        "error": exc.code,
+                        "message": str(exc),
+                        "run_dir": str(run_dir),
+                        "closest": exc.detail.get("closest") if isinstance(exc.detail, dict) else None,
+                        "identity_guess": (
+                            exc.detail.get("identity_guess") if isinstance(exc.detail, dict) else None
+                        ),
+                        "ranked": exc.detail.get("ranked") if isinstance(exc.detail, dict) else None,
+                    }, indent=2))
+                else:
+                    print(f"NO MATCH: {exc}", file=sys.stderr, flush=True)
+                    _print_closest_near_miss(exc.detail)
+                    print(f"logs: {bundle_logs.run_log_path}", file=sys.stderr, flush=True)
+                exit_code = exc.exit_code
+                return exit_code
+
+        _save_json(run_dir / "match.json", result.match)
+        _save_json(run_dir / "summary.json", result.summary)
+        LOG.info(
+            "search.done",
+            best_sim=round(result.match.best.similarity_ppm / 1e6, 4),
+            who=result.match.identity_guess or None,
+            run_dir=str(run_dir),
+        )
+
+        if args.json:
+            payload = json.loads(result.match.model_dump_json())
+            payload["run_dir"] = str(run_dir)
+            payload["run_log"] = str(bundle_logs.run_log_path)
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"scored {result.summary.candidates_scored} candidate(s) "
+                  f"from {', '.join(result.summary.providers_ok) or 'no providers'}")
+            for m in result.match.ranked[:10]:
+                print(f"  #{m.rank:<2} sim={m.similarity_ppm / 1e6:+.4f}  [{m.provider}]  {m.post_url}")
+                if m.note:
+                    print(f"       note: {m.note}")
+            b = result.match.best
+            print(f"\nBEST MATCH  sim={b.similarity_ppm / 1e6:.4f}  {b.post_url}")
+            if result.match.identity_guess:
+                conf = result.match.identity_confidence_ppm / 1e6
+                print(f"WHO         {result.match.identity_guess}  (consensus {conf:.2f})")
+                if result.match.identity_note:
+                    print(f"            {result.match.identity_note}")
+            if result.match.ambiguous:
+                print(f"AMBIGUOUS   {result.match.ambiguity_note}")
+            print(f"\nlogs        : {bundle_logs.run_log_path}")
+            print(f"telemetry   : {bundle_logs.telemetry_path}")
+        return 0
+    finally:
+        LOG.detach_run_logs(bundle_logs)
+        bundle_logs.close()
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -157,6 +352,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else:
             print(f"NO MATCH  (artifacts in {result.run_dir})")
             print(result.error)
+            debug = result.run_dir / "no_match_debug.json"
+            if debug.is_file():
+                try:
+                    detail = json.loads(debug.read_text(encoding="utf-8"))
+                    # pipeline saves the exception detail dict directly or nested
+                    if isinstance(detail, dict) and "closest" not in detail and "ranked" in detail:
+                        pass
+                    elif isinstance(detail, dict) and "detail" in detail:
+                        detail = detail["detail"]
+                    _print_closest_near_miss(detail)
+                except Exception:
+                    pass
+            print(f"logs: {result.run_dir / 'run.log'}")
         return 4
 
     assert result.bundle is not None and result.receipt is not None
@@ -175,8 +383,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"face engine   : {b.probe_face.engine}   bbox={b.probe_face.bbox}")
         print(f"BEST MATCH    : sim={b.match.best.similarity_ppm / 1e6:.4f}  "
               f"[{b.match.best.provider}]  {b.match.best.post_url}")
+        if b.match.identity_guess:
+            print(
+                f"WHO           : {b.match.identity_guess}  "
+                f"(consensus {b.match.identity_confidence_ppm / 1e6:.2f})"
+            )
         print(f"record_hash   : {b.record_hash}")
         print(f"anchored on   : {result.receipt.network}")
+        print(f"logs          : {result.run_dir / 'run.log'}")
+        print(f"telemetry     : {result.run_dir / 'telemetry.jsonl'}")
         if result.receipt.block_hash:
             print(f"  block #{result.receipt.block_index}  hash={result.receipt.block_hash}")
             print(f"  merkle_root {result.receipt.merkle_root}  (idempotent={result.receipt.idempotent_hit})")
