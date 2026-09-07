@@ -47,10 +47,21 @@ def build_providers(settings: Settings, *, strict: bool = False) -> list[SearchP
         else:
             built.append(cls())
     if not built:
+        asked = set(settings.search_providers)
+        hints = []
+        if "faceindex" in asked or "local" in asked:
+            hints.append(
+                "for offline matching: `facechain fetch-corpus --seed-demo` (or "
+                "--name \"Some Person\") then `facechain build-index`"
+            )
+        if "wikimedia" in asked:
+            hints.append("for 'wikimedia': allow network and pass --hint \"Name\" to steer it")
+        if "serpapi" in asked:
+            hints.append("for 'serpapi': set FACECHAIN_SERPAPI_KEY (+ --allow-public-host)")
+        if "multiris" in asked:
+            hints.append("for 'multiris': pip install -e '.[ris]'")
         raise ProviderError(
-            "no usable search provider. Install PicImageSearch (`pip install -e '.[ris]'`) "
-            "for 'multiris', set FACECHAIN_SERPAPI_KEY for 'serpapi', pass --hint for 'hint', "
-            "allow network for 'wikimedia', or populate the corpus with `facechain fetch-corpus`."
+            "no usable search provider was available.\n  " + "\n  ".join(hints or ["configure one"])
         )
     LOG.info(
         "search.providers",

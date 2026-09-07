@@ -19,6 +19,7 @@ Checks performed
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -56,7 +57,21 @@ def verify_run(
     live_refetch: bool = True,
 ) -> VerificationReport:
     run_dir = Path(run_dir)
+    from .errors import VerificationError
     from .pipeline import load_bundle, load_manifest, load_receipt
+
+    if not run_dir.is_dir():
+        raise VerificationError(f"run directory not found: {run_dir}")
+    if not (run_dir / "evidence.json").is_file():
+        status = None
+        mf = run_dir / "manifest.json"
+        if mf.is_file():
+            with contextlib.suppress(OSError, ValueError):
+                status = json.loads(mf.read_text("utf-8")).get("status")
+        raise VerificationError(
+            f"{run_dir} has no evidence.json - the run did not complete; nothing to verify",
+            detail=f"run status: {status}" if status else None,
+        )
 
     bundle = load_bundle(run_dir)
     receipt = load_receipt(run_dir)
