@@ -7,6 +7,37 @@
 
 ---
 
+## PROGRESS
+
+**Note on "100% accuracy":** not an achievable or credible target for open-web
+face identification (no system reaches it). Goal here = measurably the strongest
+matcher + honest benchmarks + a demo that never fails. Do not put "100%" in the
+submission.
+
+- ✅ **Phase 1 done** (commit `9909900`) — Fronts 1–4 core + trust fixes:
+  - `sface` engine = OpenCV DNN **YuNet** (landmarks) + landmark-aligned **SFace**
+    128-D embedding; default via `auto`. Model auto-downloaded + SHA-pinned
+    (`facechain fetch-models`). Fixtures: genuine ≈0.98 vs impostor <0.25.
+  - `face/calibration.py`: per-engine threshold + cosine→probability + decision
+    band. `--threshold` optional.
+  - Notarised-evidence integrity restored: `identity_*` out of `record_hash`
+    (re-runs reproducible again), honest `decided_by`, opt-in public probe host.
+  - All ruff + mypy(strict) errors from the merge cleared; 136 tests green.
+- ⏳ **Phase 2** — web identification: wire SerpAPI Lens as primary (probe
+  auto-host behind the new opt-in), add FAISS/hnswlib local face-vector index
+  over a Wikimedia + Wikidata-P18 corpus as the deterministic fallback.
+- ⏳ **Phase 3** — local VLM captioner (`facechain describe`): torch + a small
+  BLIP/Florence-class model, first-run download, offline after. Free-text caption
+  + attributes; kept separate from the face decision and the record hash.
+- ⏳ **Phase 4** — benchmark harness (`make bench`: ROC/AUC, TAR@FAR, per-engine
+  table, robustness suite), `runs/<id>/report.html`, `facechain doctor`, real
+  testnet anchor + batch Merkle + OpenTimestamps + EIP-712, standalone verifier,
+  Dockerfile.
+
+Remaining detail for each front is unchanged below.
+
+---
+
 ## 0. Strategic framing
 
 - The **blockchain / verification half is already strong** (canonical hashing,
