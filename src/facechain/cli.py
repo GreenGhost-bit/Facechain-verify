@@ -41,6 +41,10 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                    help="permit uploading the probe to a public file host so SerpAPI "
                         "Lens can crawl it (off by default; needed only for serpapi "
                         "without --probe-image-url)")
+    p.add_argument("--full-frame-search", action="store_true",
+                   help="send the whole image to reverse-image engines instead of a "
+                        "face crop (default is a crop, so Lens/Yandex match the person "
+                        "not the shirt/background)")
     p.add_argument("--difficulty", type=int, default=None,
                    help="local-chain proof-of-work leading zero bits (default: 0)")
     p.add_argument("--runs-dir", default=None)
@@ -82,6 +86,8 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
 
     if getattr(args, "allow_public_host", False):
         overrides["allow_public_probe_host"] = True
+    if getattr(args, "full_frame_search", False):
+        overrides["reverse_image_face_crop"] = False
 
     settings = Settings.load(**overrides)
     # Threshold is resolved per-engine downstream (calibration table); here we
@@ -240,7 +246,9 @@ def _cmd_search(args: argparse.Namespace) -> int:
                  size=f"{image.fingerprint.width}x{image.fingerprint.height}")
         engine = build_face_engine(settings.face_engine)
         settings = settings.with_calibrated_threshold(engine.name)
-        _, embedding, _ = encode_probe(image, engine=engine, min_face_pixels=settings.min_face_pixels)
+        _probe_rec, embedding, _ = encode_probe(
+            image, engine=engine, min_face_pixels=settings.min_face_pixels
+        )
         providers = build_providers(settings)
         with SafeFetcher(contact=settings.http_contact, timeout_s=settings.http_timeout_s,
                          max_redirects=settings.http_max_redirects,
@@ -250,7 +258,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
             )
             ctx = ProbeContext(image_bytes=image.raw_bytes, rgb=image.rgb, embedding=embedding,
                                settings=settings, fetcher=fetcher, face_engine=engine, hint=args.hint,
-                               extra=_probe_extra)
+                               extra=_probe_extra, face_bbox=list(_probe_rec.bbox))
             try:
                 result = SearchAggregator(providers).run(ctx)
             except FaceChainError as exc:

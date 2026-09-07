@@ -82,6 +82,9 @@ class Settings(BaseModel):
     # this is True, the probe is uploaded to a short-lived public file host. Off
     # by default: publishing the subject's face is an explicit choice.
     allow_public_probe_host: bool = Field(default=False)
+    # Send a tight face crop (not the full frame) to reverse-image engines, so
+    # Lens/Yandex match the person rather than the shirt/background.
+    reverse_image_face_crop: bool = Field(default=True)
     http_contact: str = "facechain-verify (contact: unset)"
     http_timeout_s: float = Field(default=20.0, gt=0)
     http_max_redirects: int = Field(default=3, ge=0, le=10)
@@ -161,6 +164,8 @@ class Settings(BaseModel):
             data["http_contact"] = v
         if (v := pick(f"{_ENV_PREFIX}ALLOW_PUBLIC_PROBE_HOST")) is not None:
             data["allow_public_probe_host"] = v.strip().lower() in {"1", "true", "yes", "on"}
+        if (v := pick(f"{_ENV_PREFIX}REVERSE_IMAGE_FACE_CROP")) is not None:
+            data["reverse_image_face_crop"] = v.strip().lower() in {"1", "true", "yes", "on"}
         if (v := pick(f"{_ENV_PREFIX}ANCHOR_BACKEND")) is not None:
             data["anchor_backend"] = v
         if (v := pick(f"{_ENV_PREFIX}CHAIN_DIFFICULTY_BITS")) is not None:

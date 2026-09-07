@@ -200,7 +200,7 @@ class MultiRisProvider:
         limit = probe.settings.max_candidates_per_provider
         suffix = ".jpg"
         # Preserve a plausible extension for engines that sniff content-type from name.
-        raw = probe.image_bytes
+        raw = probe.reverse_image_bytes()
         if raw[:8] == b"\x89PNG\r\n\x1a\n":
             suffix = ".png"
         elif raw[:2] == b"\xff\xd8":

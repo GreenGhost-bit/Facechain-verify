@@ -210,6 +210,7 @@ def run_pipeline(
                     face_engine=engine,
                     hint=hint,
                     extra={"probe_image_url": probe_image_url} if probe_image_url else {},
+                    face_bbox=list(face_record.bbox),
                 )
                 with log.span("stage.search", providers=[p.name for p in providers]):
                     agg = SearchAggregator(providers).run(ctx)

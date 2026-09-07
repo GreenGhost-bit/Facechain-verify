@@ -61,7 +61,7 @@ class SerpApiProvider:
                 return []
             try:
                 probe_url = host_probe_image(
-                    probe.image_bytes,
+                    probe.reverse_image_bytes(),
                     timeout_s=max(30.0, float(probe.settings.http_timeout_s)),
                 )
                 hosted = True

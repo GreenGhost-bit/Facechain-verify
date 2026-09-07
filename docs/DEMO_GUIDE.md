@@ -167,13 +167,41 @@ python -m facechain run "C:\path\to\photo.jpg" --providers serpapi --allow-publi
 | Two similarly-sized faces in the probe | run notes it as ambiguous, uses the largest |
 | `facechain describe <any photo>` | caption + size/brightness/sharpness/colours/face-count |
 
-### 2f. Quick quality gates (for your own sanity / the repo)
+### 2f. "Lens returned the shirt / a product, not the person"
+
+Google Lens is a *general* visual search — it locks onto the most distinctive
+object (clothing, logo, background) and **Google deliberately does not do face
+matching in Lens** for privacy. So this is Lens working as designed, just not for
+identification. What helps:
+
+1. **A face crop is already sent by default.** The pipeline sends a tight crop
+   around the detected face to reverse-image engines, not the whole frame, so
+   there's no shirt/background to latch onto. `--full-frame-search` disables it;
+   `FACECHAIN_REVERSE_IMAGE_FACE_CROP=0` disables it permanently.
+2. **Use Yandex, not Lens, for faces.** Yandex still does face reverse-search and
+   routinely finds social profiles. `pip install -e ".[ris]"` then
+   `--providers multiris` (Yandex + Bing + TinEye + Lens together).
+3. **Name search beats reverse-image for a known person:**
+   `--hint "Full Name"` (uses Google Images + Wikimedia by name).
+4. **The person must have public photos on the web.** If they're not on any
+   public site, no engine will find them — use the `faceindex` gallery path
+   instead (2b, option C).
+5. The pipeline protects you either way: even if Lens returns 40 shirt photos,
+   the aggregator re-checks each one's *face* against the probe, so a wrong
+   object match can't become a false identification — it just reports NO MATCH.
 
 ```powershell
-python -m pytest -q -m "not slow"     # 152 fast tests
+pip install -e ".[ris]"
+python -m facechain run "C:\path\photo.jpg" --providers multiris --hint "Full Name"
+```
+
+### 2g. Quick quality gates (for your own sanity / the repo)
+
+```powershell
+python -m pytest -q -m "not slow"     # 160 fast tests
 python -m ruff check .                # style
 python -m mypy                        # strict types
-python -m facechain bench             # ROC/AUC/EER + robustness → bench/results.md
+python -m facechain bench             # ROC/AUC/EER + robustness -> bench/results.md
 ```
 
 ---

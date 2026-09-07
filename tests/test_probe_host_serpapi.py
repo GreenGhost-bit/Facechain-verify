@@ -12,6 +12,17 @@ from facechain.search.probe_host import _sniff_name_and_type, host_probe_image
 from facechain.search.serpapi_provider import SerpApiProvider
 
 
+def _fake_probe(*, image_bytes: bytes, settings: object, fetcher: object, extra: dict) -> SimpleNamespace:
+    """A ProbeContext stand-in that also answers reverse_image_bytes()."""
+    return SimpleNamespace(
+        image_bytes=image_bytes,
+        settings=settings,
+        fetcher=fetcher,
+        extra=extra,
+        reverse_image_bytes=lambda: image_bytes,
+    )
+
+
 def test_sniff_png_and_jpeg() -> None:
     assert _sniff_name_and_type(b"\x89PNG\r\n\x1a\n....") == ("probe.png", "image/png")
     assert _sniff_name_and_type(b"\xff\xd8\xff....") == ("probe.jpg", "image/jpeg")
@@ -79,12 +90,7 @@ def test_serpapi_auto_hosts_when_no_probe_url() -> None:
         http_timeout_s=20.0,
         allow_public_probe_host=True,
     )
-    probe = SimpleNamespace(
-        image_bytes=b"\x89PNG\r\n\x1a\nxxxx",
-        settings=settings,
-        fetcher=fetcher,
-        extra={},
-    )
+    probe = _fake_probe(image_bytes=b"\x89PNG\r\n\x1a\nxxxx", settings=settings, fetcher=fetcher, extra={})
     with patch(
         "facechain.search.serpapi_provider.host_probe_image",
         return_value="https://files.catbox.moe/probe.png",
@@ -108,12 +114,7 @@ def test_serpapi_uses_explicit_probe_url_without_hosting() -> None:
         http_timeout_s=20.0,
         allow_public_probe_host=False,
     )
-    probe = SimpleNamespace(
-        image_bytes=b"\xff\xd8\xff",
-        settings=settings,
-        fetcher=fetcher,
-        extra={"probe_image_url": "https://example.com/mine.jpg"},
-    )
+    probe = _fake_probe(image_bytes=b"\xff\xd8\xff", settings=settings, fetcher=fetcher, extra={"probe_image_url": "https://example.com/mine.jpg"})
     with patch("facechain.search.serpapi_provider.host_probe_image") as host:
         list(SerpApiProvider().search(probe))  # type: ignore[arg-type]
     host.assert_not_called()
@@ -128,12 +129,7 @@ def test_serpapi_skips_hosting_when_not_opted_in() -> None:
         http_timeout_s=20.0,
         allow_public_probe_host=False,
     )
-    probe = SimpleNamespace(
-        image_bytes=b"\x89PNG\r\n\x1a\nxxxx",
-        settings=settings,
-        fetcher=fetcher,
-        extra={},
-    )
+    probe = _fake_probe(image_bytes=b"\x89PNG\r\n\x1a\nxxxx", settings=settings, fetcher=fetcher, extra={})
     with patch("facechain.search.serpapi_provider.host_probe_image") as host:
         out = list(SerpApiProvider().search(probe))  # type: ignore[arg-type]
     host.assert_not_called()
