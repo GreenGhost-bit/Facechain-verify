@@ -87,6 +87,9 @@ class MatchResult(StrictModel):
     decided_by: Literal["embedding_cosine"] = "embedding_cosine"
     ambiguous: bool = False
     ambiguity_note: str = ""
+    identity_guess: str = ""
+    identity_confidence_ppm: int = 0
+    identity_note: str = ""
     best: Candidate
     ranked: list[Candidate] = Field(default_factory=list)
 

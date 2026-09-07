@@ -13,7 +13,8 @@ Produces a self-describing ``runs/<run_id>/`` directory:
     evidence.json        the notarised EvidenceBundle (record_hash inside)
     receipt.json         AnchorReceipt (how to read the hash back)
     verification.json    result of an immediate independent re-verification
-    telemetry.jsonl      structured, timed log of the whole run
+    telemetry.jsonl      structured JSON log of the whole run
+    run.log              plain-text timeline (tail -f friendly)
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from .face import build_face_engine, encode_probe
 from .face.base import DetectedFace
 from .face.descriptor import align_crop
 from .imaging import load_image_path
-from .logging import LOG, get_logger
+from .logging import LOG, get_logger, open_run_logs
 from .models import (
     AnchorReceipt,
     EvidenceBundle,
@@ -115,10 +116,15 @@ def run_pipeline(
     (run_dir / "candidates").mkdir(exist_ok=True)
 
     log = get_logger("facechain.run").bind(run_id=run_id)
-    telemetry = (run_dir / "telemetry.jsonl").open("w", encoding="utf-8")
-    log.add_sink(telemetry)
-    LOG.add_sink(telemetry)
-
+    bundle_logs = open_run_logs(run_dir)
+    log.attach_run_logs(bundle_logs)
+    LOG.attach_run_logs(bundle_logs)
+    LOG.info(
+        "run.logs",
+        run_dir=str(run_dir),
+        run_log=str(bundle_logs.run_log_path),
+        telemetry=str(bundle_logs.telemetry_path),
+    )
     digest = settings_digest(settings)
     manifest = RunManifest(
         run_id=run_id,
@@ -261,8 +267,10 @@ def run_pipeline(
         LOG.error("pipeline.error", run_dir=str(run_dir), code=exc.code, detail=str(exc))
         raise
     finally:
-        LOG.remove_sink(telemetry)
-        telemetry.close()
+        LOG.info("run.logs.closed", run_dir=str(run_dir), run_log=str(bundle_logs.run_log_path))
+        LOG.detach_run_logs(bundle_logs)
+        log.detach_run_logs(bundle_logs)
+        bundle_logs.close()
 
 
 def load_bundle(run_dir: Path) -> EvidenceBundle:
