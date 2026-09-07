@@ -27,6 +27,24 @@ Verification**.
 
 If you just want to see it work, jump to **[60‑second quick start](#60second-quick-start)**.
 
+### Capabilities at a glance
+
+| Command | What it does |
+|---|---|
+| `facechain run IMG` | full pipeline: detect+encode face → web/corpus match → Merkle‑chain anchor → auto re‑verify → `report.html` |
+| `run --sign` | also Ed25519‑sign the `record_hash` (proves *who* produced the evidence) |
+| `run --describe` | also caption the image with a local VLM + structured attributes (advisory) |
+| `facechain verify DIR` | independent re‑verification: re‑derive every hash, re‑read the chain, check the signature |
+| `facechain report DIR` | self‑contained `report.html` (inline images, no external resources) |
+| `facechain bench` | ROC / AUC / EER / TAR@FAR + robustness sweep per engine → `bench/` |
+| `facechain doctor` | which engines / providers / anchors / extras are available and how to enable them |
+| `facechain build-index` / `fetch-corpus --name` | build the offline face‑vector index from Wikidata portraits |
+| `facechain keygen` / `describe` / `fetch-models` | signing key · image description · one‑time model fetch |
+
+Face engine default is **`sface`** (YuNet detector + landmark‑aligned SFace 128‑D
+embedding). Benchmarked genuine/impostor margin: **sface 0.84 vs the classical
+LBPH descriptor 0.19** — see [`bench/results.md`](bench/results.md).
+
 ---
 
 ## Table of contents

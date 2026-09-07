@@ -107,6 +107,7 @@ def run_pipeline(
     probe_image_url: str | None = None,
     verify_after: bool = True,
     sign_key: str | None = None,
+    describe: bool = False,
 ) -> RunResult:
     """Execute the full pipeline. Raises :class:`FaceChainError` subclasses on
     unrecoverable stage failures (after writing a manifest)."""
@@ -171,6 +172,20 @@ def run_pipeline(
                 )
             _save_json(run_dir / "face.json", face_record)
             np.save(run_dir / "embedding.npy", embedding)
+
+            # 2b. optional image description (advisory; not in record_hash)
+            if describe:
+                try:
+                    from .describe import describe_image
+
+                    with log.span("stage.describe"):
+                        desc = describe_image(probe.rgb)
+                    _save_json(run_dir / "describe.json", desc)
+                    manifest.artifacts["describe"] = "describe.json"
+                    LOG.info("pipeline.described", caption=desc.get("caption"))
+                except Exception as exc:  # never fail a run over the caption
+                    LOG.warning("pipeline.describe_failed", error=str(exc))
+
             x, y, w, h = face_record.bbox
             crop = align_crop(probe.rgb, DetectedFace(x, y, w, h))
             Image.fromarray(crop, "L").save(run_dir / "face_crop.png")

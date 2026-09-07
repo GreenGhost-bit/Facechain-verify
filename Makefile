@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 PY ?= python
 
-.PHONY: help install install-dev lint type test test-all cov bench demo demo-live chain-demo clean
+.PHONY: help install install-dev lint type test test-all cov bench doctor demo demo-live chain-demo clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -30,6 +30,9 @@ cov: ## pytest with coverage report
 
 bench: ## Benchmark every face engine -> bench/results.md + roc.svg
 	$(PY) -m facechain bench
+
+doctor: ## Show which engines / providers / anchors / extras are available
+	$(PY) -m facechain doctor
 
 demo: ## Full OFFLINE pipeline: seed corpus -> run -> verify -> tamper demo
 	$(PY) -m facechain fetch-corpus --seed-demo

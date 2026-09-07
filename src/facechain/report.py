@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import base64
 import html
+import io
 import json
 import mimetypes
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from .face.calibration import band, probability
 from .models import EvidenceBundle, VerificationReport
+
+_MAX_INLINE_PX = 900
 
 _CSS = """
 :root { color-scheme: light dark; --fg:#0f172a; --mut:#64748b; --line:#e2e8f0;
@@ -47,11 +52,27 @@ a { color:inherit; }
 """
 
 
-def _data_uri(path: Path) -> str:
+def _data_uri(path: Path, *, max_px: int = _MAX_INLINE_PX) -> str:
+    """Base64 data URI for an image, downscaled so the report stays small."""
     if not path.is_file():
         return ""
+    raw = path.read_bytes()
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img.load()
+        if max(img.size) > max_px:
+            img.thumbnail((max_px, max_px), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            fmt = "PNG" if (img.mode in ("RGBA", "P", "LA")) else "JPEG"
+            img.convert("RGB" if fmt == "JPEG" else img.mode).save(
+                buf, format=fmt, quality=82
+            )
+            raw = buf.getvalue()
+            return f"data:image/{fmt.lower()};base64," + base64.b64encode(raw).decode("ascii")
+    except Exception:  # not an image / Pillow can't read it -> inline as-is
+        pass
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
 
 
 def _esc(x: object) -> str:
@@ -116,6 +137,43 @@ def _candidates_table(run_dir: Path) -> str:
         "<h2>Ranked candidates</h2><div class='card'><table>"
         "<tr><th>#</th><th></th><th>cosine</th><th>provider</th><th>source</th></tr>"
         + "".join(rows) + "</table></div>"
+    )
+
+
+def _describe_block(run_dir: Path) -> str:
+    p = run_dir / "describe.json"
+    if not p.is_file():
+        return ""
+    try:
+        d = json.loads(p.read_text("utf-8"))
+    except json.JSONDecodeError:
+        return ""
+    a = d.get("attributes", {})
+    cap = d.get("caption")
+    cols = "".join(
+        f"<span style='display:inline-block;width:14px;height:14px;border-radius:3px;"
+        f"background:{_esc(c.get('hex'))};vertical-align:middle;margin-right:4px'></span>"
+        f"{_esc(c.get('hex'))} "
+        for c in a.get("dominant_colours", [])
+    )
+    caption_html = (
+        f"<p style='font-size:15px'>&ldquo;<b>{_esc(cap)}</b>&rdquo; "
+        f"<span class='mut'>&mdash; {_esc(d.get('caption_model'))}</span></p>"
+        if cap else
+        f"<p class='mut'>caption unavailable: {_esc(d.get('caption_error', 'n/a'))}</p>"
+    )
+    return (
+        "<h2>Image description <span class='mut'>(advisory &mdash; not in record_hash)</span></h2>"
+        f"<div class='card'>{caption_html}<table class='kv'>"
+        f"<tr><td>size</td><td>{a.get('width')}&times;{a.get('height')} &nbsp; "
+        f"{a.get('megapixels')} MP</td></tr>"
+        f"<tr><td>brightness</td><td>{a.get('mean_brightness')} "
+        f"{'(low light)' if a.get('is_low_light') else ''}</td></tr>"
+        f"<tr><td>sharpness</td><td>lapvar {a.get('sharpness_lapvar')} "
+        f"{'(blurry)' if a.get('is_blurry') else '(sharp)'}</td></tr>"
+        f"<tr><td>faces</td><td>{a.get('faces_detected', '&mdash;')}</td></tr>"
+        f"<tr><td>dominant colours</td><td>{cols}</td></tr>"
+        "</table></div>"
     )
 
 
@@ -214,6 +272,8 @@ def build_report(run_dir: str | Path) -> Path:
 </div>
 
 {_candidates_table(run_dir)}
+
+{_describe_block(run_dir)}
 
 <h2>Evidence &amp; anchor</h2>
 <div class="card"><table class="kv">

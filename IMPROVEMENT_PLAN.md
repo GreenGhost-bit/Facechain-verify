@@ -48,13 +48,24 @@ submission.
   - `facechain keygen` + `run --sign`: Ed25519 operator signature over
     `record_hash` → `signature.json`; `verify` adds an `operator.signature`
     check (11/11). `[sign]` extra = cryptography.
-- ⏳ **Phase 3** — local VLM captioner (`facechain describe`): torch + a small
-  captioning model, first-run download, offline after. Free-text caption +
-  attributes; separate from the face decision and the record hash. `[describe]`
-  extra defined.
+- ✅ **Phase 3 done** — `facechain describe <image>` (+ `run --describe`):
+  - deterministic attributes (size, brightness, Laplacian sharpness, dominant
+    colours, face count/size) — always available, no model;
+  - free-text caption from a local BLIP model (`Salesforce/blip-image-captioning-base`
+    by default, `FACECHAIN_CAPTION_MODEL` to override), downloaded once then
+    offline on CPU. Verified: probe_obama.jpg → *"president obama smiles for the
+    camera"*.
+  - Advisory only: written as `describe.json`, shown in the HTML report, never in
+    `record_hash`. `[describe]` extra = torch + transformers. Caption test marked
+    `slow` + skipped without the extra.
 
 Deferred (documented optional, not blocking): OpenTimestamps secondary anchor;
 real testnet demo deploy (the EVM backend + contract already exist).
+
+**Status: all four phases complete.** 157 tests green, ruff + mypy(strict) clean.
+CLI surface: `run` (+`--sign`/`--describe`), `search`, `identify`, `verify`,
+`report`, `bench`, `doctor`, `keygen`, `describe`, `build-index`, `fetch-models`,
+`fetch-corpus` (+`--name`), `chain`, `version`.
 
 Remaining detail for each front is unchanged below.
 

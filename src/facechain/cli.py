@@ -335,7 +335,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     result = run_pipeline(args.image, settings, hint=args.hint,
                           probe_image_url=args.probe_image_url,
                           verify_after=not args.no_verify,
-                          sign_key=sign_key)
+                          sign_key=sign_key,
+                          describe=getattr(args, "describe", False))
     if result.status == "no_match":
         if args.json:
             print(json.dumps({"status": "no_match", "run_dir": str(result.run_dir),
@@ -488,6 +489,36 @@ def _cmd_build_index(args: argparse.Namespace) -> int:
     engine = build_face_engine(settings.face_engine)
     n = FaceIndex(settings.corpus_dir, engine).build(rebuild=bool(getattr(args, "rebuild", False)))
     print(f"indexed {n} corpus face(s) for engine '{engine.name}' under {settings.corpus_dir}")
+    return 0
+
+
+def _cmd_describe(args: argparse.Namespace) -> int:
+    from .describe import describe_image
+
+    result = describe_image(
+        args.image,
+        with_caption=not args.no_caption,
+        with_faces=not args.no_faces,
+        model_id=args.model,
+    )
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    a = result["attributes"]
+    if result.get("caption"):
+        print(f"CAPTION   {result['caption']}   [{result.get('caption_model')}]")
+    elif result.get("caption_error"):
+        print(f"CAPTION   (unavailable: {result['caption_error']})")
+    print(f"SIZE      {a['width']}x{a['height']}  {a['megapixels']} MP  aspect {a['aspect_ratio']}")
+    print(f"LIGHT     brightness {a['mean_brightness']}  "
+          f"{'low-light ' if a['is_low_light'] else ''}"
+          f"{'blurry' if a['is_blurry'] else 'sharp'} (lapvar {a['sharpness_lapvar']})")
+    print("COLOURS   " + ", ".join(f"{c['hex']} {c['fraction']:.0%}" for c in a["dominant_colours"]))
+    if "faces_detected" in a:
+        print(f"FACES     {a['faces_detected']}"
+              + (f"  largest {a['largest_face']['bbox']} "
+                 f"({a['largest_face']['fraction_of_frame']:.0%} of frame)"
+                 if a.get("largest_face") else ""))
     return 0
 
 
@@ -645,6 +676,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Ed25519-sign the record_hash (needs '.[sign]'); "
                         "key from --key / FACECHAIN_SIGNING_KEY, else auto-created under chaindata/")
     p.add_argument("--key", default=None, help="path to the hex Ed25519 private key for --sign")
+    p.add_argument("--describe", action="store_true",
+                   help="also write describe.json (VLM caption + attributes; needs '.[describe]')")
     p.set_defaults(func=_cmd_run)
 
     p = sub.add_parser("verify", help="independently re-verify a run directory")
@@ -664,6 +697,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("keygen", help="create an Ed25519 operator signing key")
     p.add_argument("--out", default=None, help="key file path (default: operator_ed25519.key)")
     p.set_defaults(func=_cmd_keygen)
+
+    p = sub.add_parser("describe", help="describe any image: attributes + local VLM caption")
+    p.add_argument("image")
+    p.add_argument("--no-caption", action="store_true", help="skip the VLM caption (attributes only)")
+    p.add_argument("--no-faces", action="store_true", help="skip face detection")
+    p.add_argument("--model", default=None, help="caption model id (default: BLIP base)")
+    p.add_argument("--json", action="store_true", help="emit JSON")
+    p.set_defaults(func=_cmd_describe)
 
     p = sub.add_parser("chain", help="inspect the local ledger")
     _add_common(p)
