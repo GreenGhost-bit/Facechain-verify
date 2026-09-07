@@ -19,6 +19,7 @@ Checks performed
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -209,6 +210,25 @@ def verify_run(
             report.checks.append(chk)
     except Exception as exc:
         report.add("anchor.backend", ok=False, detail=f"backend verify failed: {exc!r}")
+
+    # 9. optional operator signature over record_hash
+    sig_path = run_dir / "signature.json"
+    if sig_path.is_file():
+        from .signing import verify_signature
+
+        try:
+            sig_obj = json.loads(sig_path.read_text("utf-8"))
+        except json.JSONDecodeError:
+            report.add("operator.signature", ok=False, detail="signature.json is not valid JSON")
+        else:
+            ok_sig = verify_signature(sig_obj, bundle.record_hash)
+            report.add(
+                "operator.signature",
+                ok=ok_sig,
+                detail=f"Ed25519 by {str(sig_obj.get('public_key', ''))[:16]}...",
+                expected=bundle.record_hash,
+                actual=str(sig_obj.get("record_hash", "")),
+            )
 
     LOG.info(
         "verify.done",

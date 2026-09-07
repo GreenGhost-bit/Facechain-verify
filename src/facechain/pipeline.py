@@ -106,6 +106,7 @@ def run_pipeline(
     hint: str | None = None,
     probe_image_url: str | None = None,
     verify_after: bool = True,
+    sign_key: str | None = None,
 ) -> RunResult:
     """Execute the full pipeline. Raises :class:`FaceChainError` subclasses on
     unrecoverable stage failures (after writing a manifest)."""
@@ -235,6 +236,21 @@ def run_pipeline(
             manifest.artifacts["receipt"] = "receipt.json"
             manifest.anchor_network = receipt.network
 
+            # 5b. optional operator signature over record_hash --
+            if sign_key is not None:
+                from .signing import load_or_create_key, sign_record
+
+                priv_hex, pub_hex, created = load_or_create_key(sign_key)
+                sig = sign_record(bundle.record_hash, priv_hex)
+                _save_json(run_dir / "signature.json", sig)
+                manifest.artifacts["signature"] = "signature.json"
+                LOG.info(
+                    "pipeline.signed",
+                    public_key=pub_hex,
+                    key_file=str(sign_key),
+                    key_created=created,
+                )
+
             # 6. immediate independent verification ----------
             verification = None
             if verify_after:
@@ -247,6 +263,16 @@ def run_pipeline(
 
             manifest.status = "ok"
             _save_json(run_dir / "manifest.json", manifest)
+
+            # 7. human-readable report (best-effort; needs manifest.json on disk)
+            try:
+                from .report import build_report
+
+                build_report(run_dir)
+                manifest.artifacts["report"] = "report.html"
+                _save_json(run_dir / "manifest.json", manifest)
+            except Exception as exc:  # never fail a run over the report
+                LOG.warning("pipeline.report_failed", error=str(exc))
             LOG.info(
                 "pipeline.done",
                 run_dir=str(run_dir),

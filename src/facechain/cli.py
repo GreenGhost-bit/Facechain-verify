@@ -325,9 +325,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from .verify import format_report
 
     settings = _settings_from_args(args)
+    sign_key = None
+    if getattr(args, "sign", False):
+        import os
+
+        sign_key = args.key or os.environ.get("FACECHAIN_SIGNING_KEY") or str(
+            Path(settings.chain_dir) / "operator_ed25519.key"
+        )
     result = run_pipeline(args.image, settings, hint=args.hint,
                           probe_image_url=args.probe_image_url,
-                          verify_after=not args.no_verify)
+                          verify_after=not args.no_verify,
+                          sign_key=sign_key)
     if result.status == "no_match":
         if args.json:
             print(json.dumps({"status": "no_match", "run_dir": str(result.run_dir),
@@ -483,6 +491,107 @@ def _cmd_build_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_keygen(args: argparse.Namespace) -> int:
+    from .signing import load_or_create_key
+
+    path = args.out or "operator_ed25519.key"
+    priv_hex, pub_hex, created = load_or_create_key(path)
+    del priv_hex
+    print(f"{'created' if created else 'loaded'}: {path}")
+    print(f"public key (hex): {pub_hex}")
+    print("keep the key file secret; share only the public key for verification")
+    return 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Print what's installed / configured and what each capability needs."""
+    import importlib.util as ilu
+    import platform
+
+    settings = _settings_from_args(args)
+    rows: list[tuple[str, str, str]] = []
+
+    def add(name: str, ok: bool | None, note: str) -> None:
+        mark = {True: "ok", False: "MISSING", None: "--"}[ok]
+        rows.append((name, mark, note))
+
+    def have(mod: str) -> bool:
+        return ilu.find_spec(mod) is not None
+
+    print(f"facechain-verify {__version__}   python {platform.python_version()}   {platform.platform()}")
+    print()
+
+    for m in ("numpy", "PIL", "pydantic", "httpx"):
+        add(f"core: {m}", have(m), "required")
+
+    # face engines
+    from .face.factory import _is_available as _face_ok
+
+    add("engine: insightface (ArcFace)", _face_ok("insightface"),
+        "pip install -e '.[insightface]'  (optional, best)")
+    try:
+        from .face.onnx_zoo import sface_is_cached
+        cached = sface_is_cached()
+    except Exception:
+        cached = False
+    add("engine: sface (YuNet+SFace)", _face_ok("sface"),
+        "DEFAULT" + ("" if cached else "  -- run: facechain fetch-models"))
+    add("engine: opencv (Haar+LBPH)", _face_ok("opencv"), "pip install -e '.[opencv]'")
+    add("engine: numpy (pure-python)", True, "always available (slow fallback)")
+
+    # search providers
+    add("search: serpapi (Google Lens)", bool(settings.serpapi_key),
+        "set FACECHAIN_SERPAPI_KEY" + ("" if settings.allow_public_probe_host
+                                       else "  (+ --allow-public-host or --probe-image-url)"))
+    add("search: multiris (Yandex/Bing/..)", have("PicImageSearch"), "pip install -e '.[ris]'")
+    add("search: wikimedia", True, "keyless, needs network")
+    corpus_n = 0
+    if settings.corpus_dir.is_dir():
+        corpus_n = sum(1 for p in settings.corpus_dir.iterdir()
+                       if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"})
+    idx = (settings.corpus_dir / ".faceindex").is_dir()
+    add("search: faceindex (offline)", corpus_n > 0,
+        f"{corpus_n} corpus image(s), index {'built' if idx else 'NOT built -- facechain build-index'}")
+
+    # anchoring
+    add("anchor: local Merkle chain", True, "DEFAULT, no secrets")
+    add("anchor: evm testnet", have("web3") and bool(settings.evm_rpc_url),
+        "pip install -e '.[evm]' + FACECHAIN_EVM_RPC_URL / _PRIVATE_KEY")
+
+    # optional extras
+    add("sign: ed25519 operator signature", have("cryptography"),
+        "pip install cryptography  (optional; facechain run --sign)")
+    add("describe: local VLM caption", have("torch") and have("transformers"),
+        "pip install -e '.[describe]'  (optional; facechain describe)")
+
+    w = max(len(r[0]) for r in rows)
+    for name, mark, note in rows:
+        print(f"  {name:<{w}}  {mark:<8}  {note}")
+    return 0
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    from .report import build_report
+
+    out = build_report(args.run_dir)
+    print(f"report written: {out}")
+    return 0
+
+
+def _cmd_bench(args: argparse.Namespace) -> int:
+    from .bench import run_bench
+
+    md = run_bench(
+        corpus=Path(args.corpus) if args.corpus else None,
+        out_dir=Path(args.out) if args.out else None,
+        augment=not args.no_augment,
+        engines=tuple(e.strip() for e in args.engines.split(",")) if args.engines else None,
+    )
+    print(md.read_text(encoding="utf-8"))
+    print(f"\n(written to {md.parent}/)")
+    return 0
+
+
 def _cmd_fetch_models(args: argparse.Namespace) -> int:
     """Pre-download + checksum-verify the ONNX face models (YuNet + SFace)."""
     from .face.onnx_zoo import ensure_models
@@ -532,6 +641,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("image")
     _add_common(p)
     p.add_argument("--no-verify", action="store_true", help="skip the immediate re-verification")
+    p.add_argument("--sign", action="store_true",
+                   help="Ed25519-sign the record_hash (needs '.[sign]'); "
+                        "key from --key / FACECHAIN_SIGNING_KEY, else auto-created under chaindata/")
+    p.add_argument("--key", default=None, help="path to the hex Ed25519 private key for --sign")
     p.set_defaults(func=_cmd_run)
 
     p = sub.add_parser("verify", help="independently re-verify a run directory")
@@ -539,6 +652,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("--no-network", action="store_true", help="skip the live post re-fetch check")
     p.set_defaults(func=_cmd_verify)
+
+    p = sub.add_parser("report", help="render a run directory into a self-contained report.html")
+    p.add_argument("run_dir")
+    p.set_defaults(func=_cmd_report)
+
+    p = sub.add_parser("doctor", help="show installed engines / providers / anchors and what each needs")
+    _add_common(p)
+    p.set_defaults(func=_cmd_doctor)
+
+    p = sub.add_parser("keygen", help="create an Ed25519 operator signing key")
+    p.add_argument("--out", default=None, help="key file path (default: operator_ed25519.key)")
+    p.set_defaults(func=_cmd_keygen)
 
     p = sub.add_parser("chain", help="inspect the local ledger")
     _add_common(p)
@@ -574,6 +699,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("--rebuild", action="store_true", help="ignore cached vectors and re-encode all")
     p.set_defaults(func=_cmd_build_index)
+
+    p = sub.add_parser("bench", help="benchmark every face engine (ROC/AUC/EER + robustness)")
+    p.add_argument("--corpus", default=None, help="labelled folder: <identity>__<n>.jpg")
+    p.add_argument("--out", default=None, help="output dir (default: bench/)")
+    p.add_argument("--no-augment", action="store_true", help="natural pairs only")
+    p.add_argument("--engines", default=None, help="comma list to restrict (e.g. sface,opencv)")
+    p.set_defaults(func=_cmd_bench)
 
     p = sub.add_parser("version", help="print version + effective config")
     _add_common(p)

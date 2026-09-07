@@ -30,6 +30,10 @@ evm = ["web3>=6.15,<8"]
 opentimestamps = ["opentimestamps>=0.4.5"]
 # Multi-engine reverse image search (Yandex / Bing / TinEye / Google Lens file upload).
 ris = ["PicImageSearch>=3.12"]
+# Ed25519 operator signature over the record hash.
+sign = ["cryptography>=42"]
+# Local vision-language captioner for `facechain describe`.
+describe = ["torch>=2.2", "transformers>=4.40", "sentencepiece>=0.2"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
@@ -37,7 +41,7 @@ dev = [
     "ruff>=0.4",
 ]
 all = [
-    "facechain-verify[opencv,evm,ris,dev]",
+    "facechain-verify[opencv,evm,ris,sign,dev]",
 ]
 
 [project.scripts]

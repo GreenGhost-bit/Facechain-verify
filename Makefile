@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 PY ?= python
 
-.PHONY: help install install-dev lint type test test-all cov demo demo-live chain-demo clean
+.PHONY: help install install-dev lint type test test-all cov bench demo demo-live chain-demo clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -27,6 +27,9 @@ test-all: ## pytest incl. network tests
 
 cov: ## pytest with coverage report
 	$(PY) -m pytest -m "not network" --cov=facechain --cov-report=term-missing
+
+bench: ## Benchmark every face engine -> bench/results.md + roc.svg
+	$(PY) -m facechain bench
 
 demo: ## Full OFFLINE pipeline: seed corpus -> run -> verify -> tamper demo
 	$(PY) -m facechain fetch-corpus --seed-demo

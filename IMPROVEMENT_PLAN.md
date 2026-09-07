@@ -34,13 +34,27 @@ submission.
     canonical portrait per person → real identities in the offline index.
   - Default stack `serpapi, multiris, wikimedia, faceindex`; SerpAPI stays
     primary when a key is present, `faceindex` is the deterministic fallback.
+- ✅ **Phase 4 done** — proof & polish:
+  - `facechain bench` / `make bench` → `bench/results.md` + `roc.svg` +
+    `results.json`. Per-engine ROC/AUC/EER/TAR@FAR + robustness sweep (JPEG-q30,
+    resize, rotate, greyscale, gamma, crop-pad). Measured margin: **sface 0.84,
+    opencv-lbph 0.19, numpy-lbph 0.15**; numpy-lbph fails the genuine pair even
+    unperturbed — quantifies why the old default was broken.
+  - `runs/<id>/report.html` (auto-generated + `facechain report <dir>`):
+    self-contained, images base64-inlined, no external resources. Verdict +
+    calibrated probability/band, probe/match side-by-side, ranked candidates,
+    evidence + anchor, verification checks.
+  - `facechain doctor`: engine/provider/anchor/extra availability + what each needs.
+  - `facechain keygen` + `run --sign`: Ed25519 operator signature over
+    `record_hash` → `signature.json`; `verify` adds an `operator.signature`
+    check (11/11). `[sign]` extra = cryptography.
 - ⏳ **Phase 3** — local VLM captioner (`facechain describe`): torch + a small
-  BLIP/Florence-class model, first-run download, offline after. Free-text caption
-  + attributes; kept separate from the face decision and the record hash.
-- ⏳ **Phase 4** — benchmark harness (`make bench`: ROC/AUC, TAR@FAR, per-engine
-  table, robustness suite), `runs/<id>/report.html`, `facechain doctor`, real
-  testnet anchor + batch Merkle + OpenTimestamps + EIP-712, standalone verifier,
-  Dockerfile.
+  captioning model, first-run download, offline after. Free-text caption +
+  attributes; separate from the face decision and the record hash. `[describe]`
+  extra defined.
+
+Deferred (documented optional, not blocking): OpenTimestamps secondary anchor;
+real testnet demo deploy (the EVM backend + contract already exist).
 
 Remaining detail for each front is unchanged below.
 
